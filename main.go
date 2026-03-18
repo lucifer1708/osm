@@ -33,10 +33,26 @@ func main() {
 	handlers.InitAuth()
 	handlers.AutoConnect()
 
+	// ── Public files server (separate port, no auth) ───────────────────────────
+	filesPort := os.Getenv("FILES_PORT")
+	if filesPort != "" {
+		filesMux := http.NewServeMux()
+		filesMux.HandleFunc("GET /files/{path...}", handlers.PublicFileServe)
+		go func() {
+			log.Printf("Public files server → http://localhost:%s/files/<bucket>/<key>", filesPort)
+			if err := http.ListenAndServe(":"+filesPort, filesMux); err != nil {
+				log.Printf("files server error: %v", err)
+			}
+		}()
+	}
+
 	mux := http.NewServeMux()
 
 	// Static (always public)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	// Public file serving on main port too — no auth required; objects must be public on S3
+	mux.HandleFunc("GET /files/{path...}", handlers.PublicFileServe)
 
 	// First-run setup
 	mux.HandleFunc("GET /setup", handlers.SetupPage)

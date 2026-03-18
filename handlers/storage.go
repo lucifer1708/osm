@@ -613,6 +613,7 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 		"FileCount": fileCount,
 		"Toast":     msg,
 		"ToastOK":   len(errs) == 0,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
 
@@ -705,6 +706,7 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 		"FileCount": fileCount,
 		"Toast":     "'" + name + "' deleted successfully",
 		"ToastOK":   true,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
 
@@ -796,6 +798,7 @@ func CreateFolder(w http.ResponseWriter, r *http.Request) {
 		"FileCount": fileCount,
 		"Toast":     "Folder '" + folderName + "' created",
 		"ToastOK":   true,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
 
@@ -894,28 +897,48 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 		"FileCount": fileCount,
 		"Toast":     "Operation completed successfully",
 		"ToastOK":   true,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
 
-// checkPublicAccess does an unauthenticated HEAD request to test if an object is publicly readable.
-func checkPublicAccess(url string) bool {
-	client := &http.Client{
-		Timeout: 6 * time.Second,
-		// Don't follow redirects automatically — a redirect itself means the object is accessible
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+// checkPublicAccessS3 tests whether an object is publicly readable by issuing
+// a HeadObject with anonymous (unsigned) credentials against the same endpoint
+// that the authenticated client uses. This is provider-agnostic and avoids
+// fragile virtual-hosted-style URL guessing.
+func checkPublicAccessS3(bucket, key string) bool {
+	session.mu.RLock()
+	endpoint := session.Endpoint
+	region := session.Region
+	session.mu.RUnlock()
+
+	endpoint = normalizeEndpoint(endpoint)
+	if region == "" {
+		region = "us-east-1"
 	}
-	req, err := http.NewRequest(http.MethodHead, url, nil)
+
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(aws.AnonymousCredentials{}),
+	)
 	if err != nil {
 		return false
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusMovedPermanently
+
+	anonClient := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = anonClient.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	return err == nil
 }
 
 // GetACL checks the ACL for a single object and returns an HTML fragment.
@@ -1039,10 +1062,17 @@ func SetACL(w http.ResponseWriter, r *http.Request) {
 }
 
 // publicURL builds the publicly-accessible URL for an object.
-// S3-compatible providers (Hetzner, MinIO, R2, etc.) serve public objects at
-// virtual-hosted style: https://bucket.host/key — NOT path-style endpoint/bucket/key.
-// Path-style only works for authenticated API calls.
+// If PUBLIC_FILES_HOST is set, uses the custom static server URL.
+// Otherwise falls back to S3 virtual-hosted style: https://bucket.host/key.
 func publicURL(bucket, key string) string {
+	if host := os.Getenv("PUBLIC_FILES_HOST"); host != "" {
+		host = strings.TrimRight(host, "/")
+		if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+			host = "https://" + host
+		}
+		return fmt.Sprintf("%s/files/%s/%s", host, bucket, key)
+	}
+
 	session.mu.RLock()
 	endpoint := session.Endpoint
 	session.mu.RUnlock()
@@ -1064,6 +1094,53 @@ func publicURL(bucket, key string) string {
 	return fmt.Sprintf("%s/%s/%s", ep, bucket, key)
 }
 
+// PublicFileServe serves public objects at /files/{bucket}/{key...} without authentication.
+// Returns 403 if the object is not publicly accessible.
+func PublicFileServe(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		http.Error(w, "Storage not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	path := r.PathValue("path")
+	// Split into bucket + key: "mybucket/folder/file.png" → "mybucket", "folder/file.png"
+	idx := strings.Index(path, "/")
+	if idx == -1 || idx == len(path)-1 {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	bucket := path[:idx]
+	key := path[idx+1:]
+
+	if !resolvePublicState(bucket, key) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	result, err := getClient().GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	defer result.Body.Close()
+
+	if result.ContentType != nil {
+		w.Header().Set("Content-Type", *result.ContentType)
+	}
+	if result.ContentLength != nil {
+		w.Header().Set("Content-Length", strconv.FormatInt(*result.ContentLength, 10))
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000")
+
+	io.Copy(w, result.Body)
+}
+
 // aclStateCache remembers the public/private state we last set or confirmed for each object.
 // Key: "bucket\x00key", Value: bool (true = public).
 // This ensures the copy-link button reflects the correct state immediately after SetACL,
@@ -1073,15 +1150,15 @@ var aclStateCache sync.Map
 func aclCacheKey(bucket, key string) string { return bucket + "\x00" + key }
 
 // resolvePublicState returns whether the object is publicly accessible.
-// Checks the in-memory cache first (populated by SetACL), then falls back to a HEAD request.
+// Checks the in-memory cache first (populated by SetACL), then falls back to
+// an anonymous S3 HeadObject which is provider-agnostic and always reliable.
 func resolvePublicState(bucket, key string) bool {
 	ck := aclCacheKey(bucket, key)
 	if v, ok := aclStateCache.Load(ck); ok {
 		return v.(bool)
 	}
-	// Not in cache — do a HEAD request to the public URL
-	pub := publicURL(bucket, key)
-	isPublic := checkPublicAccess(pub)
+	// Not in cache — probe via anonymous S3 HeadObject
+	isPublic := checkPublicAccessS3(bucket, key)
 	aclStateCache.Store(ck, isPublic) // cache for next call
 	return isPublic
 }

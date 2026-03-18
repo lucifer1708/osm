@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
+      - "${FILES_PORT:-9090}:9090"
     volumes:
       # Persist SQLite database across restarts
       - osm-data:/data
@@ -15,6 +16,7 @@ services:
     environment:
       - PORT=8080
       - DB_PATH=/data/osm.db
+      - FILES_PORT=9090
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/login"]
       interval: 30s

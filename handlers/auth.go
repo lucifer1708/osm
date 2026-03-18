@@ -42,7 +42,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		path := r.URL.Path
 
 		// Always public
-		if strings.HasPrefix(path, "/static/") {
+		if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/files/") {
 			next.ServeHTTP(w, r)
 			return
 		}
