@@ -77,7 +77,11 @@ help:
 	@echo "  make dev          Live-reload with air"
 	@echo "  make build        Compile → ./bin/osm"
 	@echo "  make start        Build + run binary"
-	@echo "  make clean        Remove build artifacts"
+	@echo "  make docker-build Build Docker image
+  make docker-up    Start via Docker Compose
+  make docker-down  Stop Docker Compose stack
+  make docker-logs  Tail container logs
+  make clean        Remove build artifacts"
 	@echo ""
 	@echo "  PORT=9090 make run    override port"
 	@echo "  DB_PATH=/tmp/x.db make run    custom DB path"
