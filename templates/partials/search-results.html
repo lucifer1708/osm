@@ -1,0 +1,29 @@
+{{define "search-results.html"}}
+{{if .Results}}
+<div class="space-y-1">
+  <p class="text-xs text-gray-500 dark:text-gray-400 px-2 mb-2">Found {{len .Results}} result(s) for "{{.Query}}"</p>
+  {{range .Results}}
+  <div class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 group">
+    <span class="text-sm">{{fileIcon .Key}}</span>
+    <div class="flex-1 min-w-0">
+      <button onclick="showPreviewModal('{{$.Bucket}}','{{.Key}}')"
+        class="text-sm text-gray-800 dark:text-gray-200 truncate block text-left hover:text-primary-600 dark:hover:text-primary-400">
+        {{.Key}}
+      </button>
+      <span class="text-xs text-gray-500">{{formatSize .Size}} · {{formatTime .LastModified}}</span>
+    </div>
+    <div class="opacity-0 group-hover:opacity-100 flex gap-1">
+      <a href="/buckets/{{$.Bucket}}/download/{{.Key}}"
+        class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 transition-colors" title="Download">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{else if .Query}}
+<p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No results for "{{.Query}}"</p>
+{{end}}
+{{end}}

@@ -1,0 +1,145 @@
+{{define "content"}}
+{{if not .Connected}}
+<!-- Connection Screen -->
+<div class="min-h-[calc(100vh-56px)] flex items-center justify-center p-4">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <div class="w-16 h-16 bg-gradient-to-br from-primary-400 to-primary-700 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
+        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Object Storage Manager</h1>
+      <p class="text-gray-500 dark:text-gray-400 mt-1">Connect to your S3-compatible storage</p>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-6">
+      <form hx-post="/connect" hx-target="#error-msg" hx-indicator="#connect-spinner"
+        class="space-y-4">
+
+        <div id="error-msg"></div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Endpoint URL</label>
+          <input type="url" name="endpoint" value="{{.DefaultEndpoint}}" placeholder="https://s3.amazonaws.com or https://minio.example.com"
+            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white placeholder-gray-400">
+          <p class="text-xs text-gray-400 mt-1">Leave empty for standard AWS S3</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Access Key</label>
+            <input type="text" name="access_key" required placeholder="AKIAIOSFODNN7EXAMPLE"
+              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono placeholder-gray-400">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Secret Key</label>
+            <input type="password" name="secret_key" required placeholder="••••••••••••••••••••"
+              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono placeholder-gray-400">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Region</label>
+          <input type="text" name="region" value="{{.DefaultRegion}}" placeholder="us-east-1"
+            class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white placeholder-gray-400">
+        </div>
+
+        <button type="submit"
+          class="w-full flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 rounded-xl transition-colors shadow-sm">
+          <span id="connect-spinner" class="htmx-indicator spinner"></span>
+          Connect
+        </button>
+      </form>
+    </div>
+
+    <!-- Providers hint -->
+    <div class="mt-4 flex items-center justify-center gap-6">
+      <span class="text-xs text-gray-400">Compatible with:</span>
+      <div class="flex gap-4 text-xs text-gray-500">
+        <span>AWS S3</span>
+        <span>MinIO</span>
+        <span>Cloudflare R2</span>
+        <span>Wasabi</span>
+        <span>Backblaze B2</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.alert-error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+.dark .alert-error {
+  background: #450a0a;
+  color: #f87171;
+  border-color: #7f1d1d;
+}
+</style>
+
+{{else}}
+<!-- Main App -->
+<div class="flex h-[calc(100vh-56px)]">
+
+  <!-- Sidebar: Buckets -->
+  <aside class="w-64 flex-shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Buckets</h2>
+        <button onclick="showCreateBucketModal()"
+          class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-primary-600 dark:text-primary-400" title="Create bucket">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+        </button>
+      </div>
+      <!-- Search buckets -->
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/>
+        </svg>
+        <input type="text" placeholder="Filter buckets..." id="bucket-search" oninput="filterBuckets(this.value)"
+          class="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:text-white">
+      </div>
+    </div>
+
+    <div id="bucket-list" class="flex-1 overflow-y-auto p-2">
+      {{template "bucket-list.html" .}}
+    </div>
+  </aside>
+
+  <!-- Main: Object Browser -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <div id="object-panel" class="flex-1 overflow-y-auto">
+      <!-- Empty state -->
+      <div class="flex flex-col items-center justify-center h-full text-center p-8">
+        <div class="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-2xl flex items-center justify-center mb-4">
+          <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+        </div>
+        <h3 class="text-base font-medium text-gray-700 dark:text-gray-300">Select a bucket</h3>
+        <p class="text-sm text-gray-500 mt-1">Choose a bucket from the sidebar to browse files</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function filterBuckets(query) {
+  const items = document.querySelectorAll('.bucket-item');
+  items.forEach(item => {
+    const name = item.dataset.name || '';
+    item.style.display = name.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
+  });
+}
+</script>
+{{end}}
+{{end}}

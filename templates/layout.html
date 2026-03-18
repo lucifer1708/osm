@@ -1,0 +1,518 @@
+{{define "layout.html"}}
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Object Storage Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://unpkg.com/htmx-ext-response-targets@2.0.2/response-targets.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            primary: { 50:'#f0f9ff', 100:'#e0f2fe', 200:'#bae6fd', 300:'#7dd3fc', 400:'#38bdf8', 500:'#0ea5e9', 600:'#0284c7', 700:'#0369a1', 800:'#075985', 900:'#0c4a6e' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-flex; }
+    .htmx-request.htmx-indicator { display: inline-flex; }
+    .drop-zone.dragover { border-color: #0ea5e9; background: #f0f9ff; }
+    .dark .drop-zone.dragover { background: #0c4a6e; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    .toast { animation: slideIn 0.3s ease-out; }
+    .spinner { border: 2px solid #e2e8f0; border-top-color: #0ea5e9; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.8s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .file-row:hover .action-btns { opacity: 1; }
+    .action-btns { opacity: 0; transition: opacity 0.15s; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-track { background: #1e293b; }
+    .dark ::-webkit-scrollbar-thumb { background: #475569; }
+    .progress-bar { transition: width 0.3s ease; }
+  </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 h-full min-h-screen" hx-ext="response-targets">
+
+<!-- Toast Container -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<!-- Navbar -->
+<nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
+  <div class="max-w-full px-4 sm:px-6">
+    <div class="flex items-center justify-between h-14">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-gradient-to-br from-primary-500 to-primary-700 rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+          </svg>
+        </div>
+        <span class="font-semibold text-gray-900 dark:text-white text-lg">ObjectStore</span>
+        <span class="text-xs bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full font-medium">Manager</span>
+      </div>
+      <div class="flex items-center gap-3">
+        {{if .Connected}}
+        <span class="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
+          <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+          Connected
+        </span>
+        <button hx-get="/disconnect" hx-target="body" hx-swap="outerHTML"
+          class="text-xs px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors">
+          Disconnect
+        </button>
+        {{else}}
+        <span class="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+          <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+          Not connected
+        </span>
+        {{end}}
+        <!-- Logout -->
+        <a href="/logout" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400" title="Sign out">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+        </a>
+        <!-- Dark mode toggle -->
+        <button onclick="toggleDark()" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Toggle dark mode">
+          <svg id="icon-sun" class="w-4 h-4 text-gray-600 dark:text-gray-400 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M18.364 18.364l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+          </svg>
+          <svg id="icon-moon" class="w-4 h-4 text-gray-600 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<main class="max-w-full">
+  {{template "content" .}}
+</main>
+
+<!-- Modals container -->
+<div id="modal-container"></div>
+
+<script>
+// Dark mode
+function toggleDark() {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('dark', document.documentElement.classList.contains('dark'));
+}
+if (localStorage.getItem('dark') === 'true' || window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  document.documentElement.classList.add('dark');
+}
+
+// Toast system
+function showToast(msg, ok = true) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium max-w-sm ${
+    ok ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+  }`;
+  toast.innerHTML = `
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      ${ok ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>'
+           : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>'}
+    </svg>
+    <span>${msg}</span>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.animation = 'fadeOut 0.3s ease-out forwards';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+// Global HTMX event for toasts
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+  const el = evt.detail.target;
+  const toastEl = el.querySelector ? el.querySelector('[data-toast]') : null;
+  if (toastEl) {
+    showToast(toastEl.dataset.toast, toastEl.dataset.toastOk !== 'false');
+    toastEl.remove();
+  }
+});
+
+// Upload progress
+let uploadXhr = null;
+function uploadWithProgress(form, bucket, prefix) {
+  const formData = new FormData(form);
+  const progressBar = document.getElementById('upload-progress-bar');
+  const progressText = document.getElementById('upload-progress-text');
+  const progressContainer = document.getElementById('upload-progress');
+
+  progressContainer.classList.remove('hidden');
+
+  const xhr = new XMLHttpRequest();
+  uploadXhr = xhr;
+
+  xhr.upload.addEventListener('progress', (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      progressBar.style.width = pct + '%';
+      progressText.textContent = pct + '%';
+    }
+  });
+
+  xhr.addEventListener('load', () => {
+    progressContainer.classList.add('hidden');
+    progressBar.style.width = '0%';
+    closeModal();
+    // Refresh object list
+    htmx.ajax('GET', `/buckets/${bucket}/objects?prefix=${encodeURIComponent(prefix)}`, '#object-panel');
+  });
+
+  xhr.open('POST', `/buckets/${bucket}/upload`);
+  xhr.send(formData);
+  return false;
+}
+
+function cancelUpload() {
+  if (uploadXhr) uploadXhr.abort();
+  document.getElementById('upload-progress').classList.add('hidden');
+}
+
+// Modal management
+function openModal(html) {
+  document.getElementById('modal-container').innerHTML = html;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modal-container').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+// Drag & drop
+function setupDropZone(zoneId, bucket, prefix) {
+  const zone = document.getElementById(zoneId);
+  if (!zone) return;
+
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      showUploadModal(bucket, prefix, files);
+    }
+  });
+}
+
+function showUploadModal(bucket, prefix, preloadedFiles) {
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold">Upload Files</h3>
+          <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <form id="upload-form" onsubmit="return uploadWithProgress(this,'${bucket}','${prefix}')">
+            <input type="hidden" name="prefix" value="${prefix}">
+            <div id="file-drop" class="drop-zone border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center cursor-pointer hover:border-primary-400 dark:hover:border-primary-500 transition-colors mb-4"
+              onclick="document.getElementById('file-input').click()"
+              ondragover="event.preventDefault();this.classList.add('dragover')"
+              ondragleave="this.classList.remove('dragover')"
+              ondrop="event.preventDefault();this.classList.remove('dragover');handleFileDrop(event)">
+              <div class="flex flex-col items-center gap-2">
+                <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Drop files here or click to browse</p>
+                <p class="text-xs text-gray-500">Any file type, up to 500MB</p>
+              </div>
+            </div>
+            <input id="file-input" type="file" name="files" multiple class="hidden" onchange="updateFileList(this.files)">
+            <div id="file-list" class="space-y-1 mb-4 max-h-40 overflow-y-auto"></div>
+            <div id="upload-progress" class="hidden mb-4">
+              <div class="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                <span>Uploading...</span>
+                <span id="upload-progress-text">0%</span>
+              </div>
+              <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div id="upload-progress-bar" class="bg-primary-500 h-2 rounded-full progress-bar" style="width:0%"></div>
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">
+                Upload
+              </button>
+              <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `);
+
+  if (preloadedFiles) updateFileList(preloadedFiles);
+}
+
+function handleFileDrop(e) {
+  const dt = new DataTransfer();
+  [...e.dataTransfer.files].forEach(f => dt.items.add(f));
+  document.getElementById('file-input').files = dt.files;
+  updateFileList(e.dataTransfer.files);
+}
+
+function updateFileList(files) {
+  const list = document.getElementById('file-list');
+  list.innerHTML = '';
+  [...files].forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'flex items-center justify-between text-sm px-3 py-1.5 bg-gray-50 dark:bg-gray-700 rounded-lg';
+    div.innerHTML = `<span class="truncate text-gray-700 dark:text-gray-300">${f.name}</span><span class="text-xs text-gray-500 ml-2 flex-shrink-0">${formatBytes(f.size)}</span>`;
+    list.appendChild(div);
+  });
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  const k = 1024;
+  const sizes = ['B','KB','MB','GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function showPresignModal(bucket, key) {
+  fetch(`/buckets/${bucket}/presign/${key}?exp=24`)
+    .then(r => r.json())
+    .then(data => {
+      openModal(`
+        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+          <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold">Share Link</h3>
+              <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="p-6 space-y-4">
+              <p class="text-sm text-gray-600 dark:text-gray-400">Presigned URL (expires in 24 hours):</p>
+              <div class="flex gap-2">
+                <input id="presign-url" type="text" value="${data.url}" readonly
+                  class="flex-1 text-xs px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg">
+                <button onclick="copyPresignUrl()" class="px-3 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm">
+                  Copy
+                </button>
+              </div>
+              <a href="${data.url}" target="_blank" class="flex items-center gap-2 text-sm text-primary-600 dark:text-primary-400 hover:underline">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                Open in new tab
+              </a>
+            </div>
+          </div>
+        </div>
+      `);
+    });
+}
+
+function copyPresignUrl() {
+  const input = document.getElementById('presign-url');
+  navigator.clipboard.writeText(input.value);
+  showToast('Link copied to clipboard!', true);
+}
+
+function showRenameModal(bucket, key, prefix) {
+  const name = key.split('/').filter(Boolean).pop();
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold">Rename</h3>
+          <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <form hx-post="/buckets/${bucket}/copy" hx-target="#object-panel" hx-swap="innerHTML" hx-on::after-request="closeModal()">
+            <input type="hidden" name="source" value="${key}">
+            <input type="hidden" name="prefix" value="${prefix}">
+            <input type="hidden" name="move" value="true">
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-1">New name</label>
+              <input type="text" name="dest" value="${prefix}${name}" required
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+            <div class="flex gap-3">
+              <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Rename</button>
+              <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+function showPreviewModal(bucket, key) {
+  const ext = key.split('.').pop().toLowerCase();
+  const isImage = ['jpg','jpeg','png','gif','webp','svg'].includes(ext);
+  const isVideo = ['mp4','webm','ogg'].includes(ext);
+  const isText = ['txt','md','json','xml','yaml','yml','csv','log','sh','py','js','ts','go','html','css','sql','conf','env'].includes(ext);
+  const url = `/buckets/${bucket}/preview/${key}`;
+
+  let content;
+  if (isImage) {
+    content = `<img src="${url}" class="max-w-full max-h-[70vh] object-contain rounded-lg" alt="${key}">`;
+  } else if (isVideo) {
+    content = `<video src="${url}" controls class="max-w-full max-h-[70vh] rounded-lg"></video>`;
+  } else if (isText) {
+    content = `<div id="preview-loading" class="text-center py-8 text-gray-500">Loading...</div>`;
+    fetch(url).then(r => r.text()).then(text => {
+      document.getElementById('preview-loading').innerHTML = `<pre class="text-xs text-left whitespace-pre-wrap break-all max-h-[60vh] overflow-auto p-4 bg-gray-900 text-gray-100 rounded-lg">${escapeHtml(text.slice(0,50000))}</pre>`;
+    });
+  } else {
+    content = `<div class="text-center py-12">
+      <p class="text-gray-500 mb-4">Preview not available for this file type.</p>
+      <a href="/buckets/${bucket}/download/${key}" class="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl text-sm hover:bg-primary-700 transition-colors">
+        Download instead
+      </a>
+    </div>`;
+  }
+
+  const name = key.split('/').pop();
+  openModal(`
+    <div class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <h3 class="text-base font-medium truncate">${escapeHtml(name)}</h3>
+          <div class="flex items-center gap-2">
+            <a href="/buckets/${bucket}/download/${key}" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-400" title="Download">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            </a>
+            <button onclick="closeModal()" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="p-4 flex items-center justify-center overflow-auto flex-1">
+          ${content}
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function confirmDelete(msg, hxDelete, hxTarget) {
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+            <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="font-semibold">Confirm Delete</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">${msg}</p>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button onclick="closeModal()" class="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+          <button hx-delete="${hxDelete}" hx-target="${hxTarget}" hx-swap="innerHTML" onclick="closeModal()"
+            class="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  `);
+  htmx.process(document.querySelector('.fixed.inset-0'));
+}
+
+function showCreateBucketModal() {
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold">Create Bucket</h3>
+          <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <form hx-post="/buckets" hx-target="#bucket-list" hx-swap="innerHTML" hx-on::after-request="closeModal()">
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-1">Bucket Name</label>
+              <input type="text" name="name" required placeholder="my-bucket" autofocus
+                pattern="[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"
+                title="Lowercase letters, numbers, and hyphens. 3-63 characters."
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <p class="text-xs text-gray-500 mt-1">Lowercase letters, numbers, and hyphens only</p>
+            </div>
+            <div class="flex gap-3">
+              <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Create</button>
+              <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `);
+  htmx.process(document.querySelector('.fixed.inset-0'));
+}
+
+function showCreateFolderModal(bucket, prefix) {
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold">New Folder</h3>
+          <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <form hx-post="/buckets/${bucket}/folder" hx-target="#object-panel" hx-swap="innerHTML" hx-on::after-request="closeModal()">
+            <input type="hidden" name="prefix" value="${prefix}">
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-1">Folder Name</label>
+              <input type="text" name="name" required placeholder="new-folder" autofocus
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+            <div class="flex gap-3">
+              <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Create</button>
+              <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `);
+  htmx.process(document.querySelector('.fixed.inset-0'));
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+</script>
+</body>
+</html>
+{{end}}
