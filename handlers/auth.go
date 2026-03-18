@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -478,6 +479,109 @@ func ResetTOTP(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/totp/setup", http.StatusSeeOther)
 }
 
+// ─── Permission management (admin-only) ───────────────────────────────────────
+
+func AdminGetPermissions(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromRequest(r)
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	admin, _ := db.GetUserByID(sess.UserID)
+	if admin == nil || !admin.IsAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	targetID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	target, _ := db.GetUserByID(targetID)
+	if target == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	perms, _ := db.GetUserPermissions(targetID)
+	renderAuthTemplate(w, "user-perms.html", map[string]interface{}{
+		"Target": target,
+		"Perms":  perms,
+	})
+}
+
+func AdminSetPermission(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromRequest(r)
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	admin, _ := db.GetUserByID(sess.UserID)
+	if admin == nil || !admin.IsAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	targetID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	target, _ := db.GetUserByID(targetID)
+	if target == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	bucket := strings.TrimSpace(r.FormValue("bucket"))
+	prefix := strings.TrimSpace(r.FormValue("prefix"))
+	access := r.FormValue("access")
+	if bucket == "" {
+		bucket = "*"
+	}
+	// Normalize prefix: always end with "/" if non-empty
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	if access != "read" && access != "write" {
+		http.Error(w, "Invalid access level", http.StatusBadRequest)
+		return
+	}
+	db.UpsertPermission(targetID, bucket, prefix, access)
+	db.LogEvent(&sess.UserID, sess.Username,
+		fmt.Sprintf("perm_set:%s:%s:%s:%s", target.Username, bucket, prefix, access),
+		clientIP(r), r.UserAgent())
+
+	perms, _ := db.GetUserPermissions(targetID)
+	renderAuthTemplate(w, "user-perms.html", map[string]interface{}{
+		"Target": target,
+		"Perms":  perms,
+	})
+}
+
+func AdminDeletePermission(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromRequest(r)
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	admin, _ := db.GetUserByID(sess.UserID)
+	if admin == nil || !admin.IsAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	permID, _ := strconv.ParseInt(r.FormValue("perm_id"), 10, 64)
+	targetID, _ := strconv.ParseInt(r.FormValue("user_id"), 10, 64)
+
+	db.DeletePermission(permID, targetID)
+	db.LogEvent(&sess.UserID, sess.Username,
+		fmt.Sprintf("perm_deleted:%d", permID), clientIP(r), r.UserAgent())
+
+	target, _ := db.GetUserByID(targetID)
+	perms, _ := db.GetUserPermissions(targetID)
+	renderAuthTemplate(w, "user-perms.html", map[string]interface{}{
+		"Target": target,
+		"Perms":  perms,
+	})
+}
+
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
 func newSession(w http.ResponseWriter, userID int64, needsTOTP bool) error {
@@ -635,7 +739,12 @@ func GenPasswordHash(password string) (string, error) {
 // ─── Template helpers ─────────────────────────────────────────────────────────
 
 func renderAuthTemplate(w http.ResponseWriter, name string, data interface{}) {
-	t, err := template.New(name).Funcs(authFuncMap()).ParseFiles("templates/auth/" + name)
+	// Try auth/ first, then partials/
+	path := "templates/auth/" + name
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = "templates/partials/" + name
+	}
+	t, err := template.New(name).Funcs(authFuncMap()).ParseFiles(path)
 	if err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 		return

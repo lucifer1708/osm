@@ -1,0 +1,17 @@
+# Build artifacts
+bin/
+osm
+
+# Runtime data (never bake DB into image)
+data/
+
+# Dev tooling
+.air.toml
+tmp/
+
+# Git
+.git/
+.gitignore
+
+# Secrets — never bake into image; pass via env_file at runtime
+.env

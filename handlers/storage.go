@@ -22,7 +22,45 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/lucifer1708/object_storage_manager/db"
 )
+
+// ─── Permission helpers ───────────────────────────────────────────────────────
+
+// canAccess checks whether the current user has the required access level on
+// the given bucket+path. Admins always pass. Non-admins use the permission table.
+// op must be "read" or "write".
+func canAccess(r *http.Request, bucket, path, op string) bool {
+	sess := CurrentSession(r)
+	if sess == nil {
+		return false
+	}
+	user, _ := db.GetUserByID(sess.UserID)
+	if user == nil {
+		return false
+	}
+	if user.IsAdmin {
+		return true
+	}
+	effective := db.EffectiveAccess(sess.UserID, bucket, path)
+	switch op {
+	case "read":
+		return effective == "read" || effective == "write"
+	case "write":
+		return effective == "write"
+	}
+	return false
+}
+
+// denyAccess sends an appropriate "access denied" response for storage handlers.
+func denyAccess(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Request") == "true" {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<div class="m-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm flex items-center gap-2"><svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>Access denied — you don't have permission for this action.</div>`))
+		return
+	}
+	http.Error(w, "Access denied", http.StatusForbidden)
+}
 
 // Session holds the S3 client and config
 type Session struct {
@@ -283,6 +321,7 @@ func Index(w http.ResponseWriter, r *http.Request) {
 		} else {
 			data["ConnectError"] = err.Error()
 		}
+		data["CanManageBuckets"] = canAccess(r, "*", "", "write")
 	}
 
 	renderTemplate(w, "index", data)
@@ -354,13 +393,18 @@ func ListBuckets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderPartial(w, "bucket-list", map[string]interface{}{
-		"Buckets": buckets,
+		"Buckets":          buckets,
+		"CanManageBuckets": canAccess(r, "*", "", "write"),
 	})
 }
 
 func CreateBucket(w http.ResponseWriter, r *http.Request) {
 	if !isConnected() {
 		renderError(w, "Not connected")
+		return
+	}
+	if !canAccess(r, "*", "", "write") {
+		denyAccess(w, r)
 		return
 	}
 
@@ -394,15 +438,20 @@ func CreateBucket(w http.ResponseWriter, r *http.Request) {
 	// Return updated bucket list
 	buckets, _ := listBuckets()
 	renderPartial(w, "bucket-list", map[string]interface{}{
-		"Buckets":  buckets,
-		"Toast":    "Bucket '" + name + "' created successfully",
-		"ToastOK":  true,
+		"Buckets":          buckets,
+		"CanManageBuckets": true, // already verified above
+		"Toast":            "Bucket '" + name + "' created successfully",
+		"ToastOK":          true,
 	})
 }
 
 func DeleteBucket(w http.ResponseWriter, r *http.Request) {
 	if !isConnected() {
 		renderError(w, "Not connected")
+		return
+	}
+	if !canAccess(r, "*", "", "write") {
+		denyAccess(w, r)
 		return
 	}
 
@@ -418,9 +467,10 @@ func DeleteBucket(w http.ResponseWriter, r *http.Request) {
 
 	buckets, _ := listBuckets()
 	renderPartial(w, "bucket-list", map[string]interface{}{
-		"Buckets":  buckets,
-		"Toast":    "Bucket '" + bucket + "' deleted",
-		"ToastOK":  true,
+		"Buckets":          buckets,
+		"CanManageBuckets": true, // already verified above
+		"Toast":            "Bucket '" + bucket + "' deleted",
+		"ToastOK":          true,
 	})
 }
 
@@ -435,6 +485,11 @@ func ListObjects(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 	sortBy := r.URL.Query().Get("sort")
 	sortDir := r.URL.Query().Get("dir")
+
+	if !canAccess(r, bucket, prefix, "read") {
+		denyAccess(w, r)
+		return
+	}
 
 	objects, err := listObjects(bucket, prefix)
 	if err != nil {
@@ -460,14 +515,15 @@ func ListObjects(w http.ResponseWriter, r *http.Request) {
 	totalSize, fileCount := objectStats(objects)
 
 	renderPartial(w, "object-list", map[string]interface{}{
-		"Bucket":     bucket,
-		"Prefix":     prefix,
-		"Objects":    objects,
-		"Search":     search,
-		"SortBy":     sortBy,
-		"SortDir":    sortDir,
-		"TotalSize":  totalSize,
-		"FileCount":  fileCount,
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"Search":    search,
+		"SortBy":    sortBy,
+		"SortDir":   sortDir,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
 
@@ -486,6 +542,11 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := r.FormValue("prefix")
+
+	if !canAccess(r, bucket, prefix, "write") {
+		denyAccess(w, r)
+		return
+	}
 	makePublic := r.FormValue("acl") == "public-read"
 	files := r.MultipartForm.File["files"]
 
@@ -531,6 +592,7 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, fh.Filename+": "+err.Error())
 			continue
 		}
+		aclStateCache.Store(aclCacheKey(bucket, key), makePublic)
 		uploaded = append(uploaded, fh.Filename)
 	}
 
@@ -562,6 +624,11 @@ func DownloadObject(w http.ResponseWriter, r *http.Request) {
 
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
+
+	if !canAccess(r, bucket, key, "read") {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -598,6 +665,11 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	prefix := r.URL.Query().Get("prefix")
 
+	if !canAccess(r, bucket, key, "write") {
+		denyAccess(w, r)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -617,6 +689,7 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 			renderError(w, "Failed to delete: "+err.Error())
 			return
 		}
+		aclStateCache.Delete(aclCacheKey(bucket, key))
 	}
 
 	objects, _ := listObjects(bucket, prefix)
@@ -643,6 +716,11 @@ func PresignObject(w http.ResponseWriter, r *http.Request) {
 
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
+
+	if !canAccess(r, bucket, key, "read") {
+		denyAccess(w, r)
+		return
+	}
 	expStr := r.URL.Query().Get("exp")
 	expHours := 24
 	if expStr != "" {
@@ -681,6 +759,11 @@ func CreateFolder(w http.ResponseWriter, r *http.Request) {
 	folderName := strings.TrimSpace(r.FormValue("name"))
 	if folderName == "" {
 		renderError(w, "Folder name is required")
+		return
+	}
+
+	if !canAccess(r, bucket, prefix, "write") {
+		denyAccess(w, r)
 		return
 	}
 	folderName = strings.Trim(folderName, "/")
@@ -725,6 +808,11 @@ func PreviewObject(w http.ResponseWriter, r *http.Request) {
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
 
+	if !canAccess(r, bucket, key, "read") {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -764,6 +852,11 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 	destKey := r.FormValue("dest")
 	prefix := r.FormValue("prefix")
 
+	if !canAccess(r, bucket, sourceKey, "write") {
+		denyAccess(w, r)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -777,12 +870,16 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If rename (source != dest prefix area), delete original
+	// If rename, delete original and move cache entry
 	if r.FormValue("move") == "true" {
 		_, _ = getClient().DeleteObject(ctx, &s3.DeleteObjectInput{
 			Bucket: aws.String(bucket),
 			Key:    aws.String(sourceKey),
 		})
+		if v, ok := aclStateCache.Load(aclCacheKey(bucket, sourceKey)); ok {
+			aclStateCache.Store(aclCacheKey(bucket, destKey), v)
+			aclStateCache.Delete(aclCacheKey(bucket, sourceKey))
+		}
 	}
 
 	objects, _ := listObjects(bucket, prefix)
@@ -800,10 +897,15 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// checkPublicAccess does an unauthenticated HEAD request to determine if the object is publicly readable.
-// This is more reliable than GetObjectAcl which some S3-compatible providers don't implement correctly.
+// checkPublicAccess does an unauthenticated HEAD request to test if an object is publicly readable.
 func checkPublicAccess(url string) bool {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout: 6 * time.Second,
+		// Don't follow redirects automatically — a redirect itself means the object is accessible
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	req, err := http.NewRequest(http.MethodHead, url, nil)
 	if err != nil {
 		return false
@@ -813,7 +915,7 @@ func checkPublicAccess(url string) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusMovedPermanently
 }
 
 // GetACL checks the ACL for a single object and returns an HTML fragment.
@@ -825,42 +927,47 @@ func GetACL(w http.ResponseWriter, r *http.Request) {
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
 
-	pubURL := publicURL(bucket, key)
-	isPublic := checkPublicAccess(pubURL)
-	if !isPublic {
-		pubURL = ""
+	if !canAccess(r, bucket, key, "read") {
+		denyAccess(w, r)
+		return
+	}
+
+	isPublic := resolvePublicState(bucket, key)
+	pubURL := ""
+	if isPublic {
+		pubURL = publicURL(bucket, key)
 	}
 
 	renderPartial(w, "acl-panel", map[string]interface{}{
-		"Bucket":    bucket,
-		"Key":       key,
-		"IsPublic":  isPublic,
+		"Bucket":   bucket,
+		"Key":      key,
+		"IsPublic": isPublic,
 		"PublicURL": pubURL,
-		"ACLError":  "",
+		"ACLError": "",
+		"CanWrite": canAccess(r, bucket, key, "write"),
 	})
 }
 
 // GetACLJSON returns JSON with public status and URL — used by the copy-link button.
 func GetACLJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if !isConnected() {
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"public": false, "url": ""})
 		return
 	}
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
 
-	pubURL := publicURL(bucket, key)
-	isPublic := checkPublicAccess(pubURL)
-	if !isPublic {
-		pubURL = ""
+	isPublic := resolvePublicState(bucket, key)
+	pubURL := ""
+	if isPublic {
+		pubURL = publicURL(bucket, key)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"public": isPublic, "url": pubURL})
 }
 
-// SetACL sets public-read or private ACL on an object.
+// SetACL sets public-read or private ACL on an object. Requires write access.
 func SetACL(w http.ResponseWriter, r *http.Request) {
 	if !isConnected() {
 		renderError(w, "Not connected")
@@ -868,6 +975,10 @@ func SetACL(w http.ResponseWriter, r *http.Request) {
 	}
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
+	if !canAccess(r, bucket, key, "write") {
+		denyAccess(w, r)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		renderError(w, err.Error())
 		return
@@ -881,24 +992,39 @@ func SetACL(w http.ResponseWriter, r *http.Request) {
 		cannedACL = types.ObjectCannedACLPrivate
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Try PutObjectAcl first (native ACL API)
 	_, err := getClient().PutObjectAcl(ctx, &s3.PutObjectAclInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 		ACL:    cannedACL,
 	})
 	if err != nil {
-		renderPartial(w, "acl-panel", map[string]interface{}{
-			"Bucket":   bucket,
-			"Key":      key,
-			"ACLError": "Failed to update ACL: " + err.Error(),
+		// Fall back to copy-in-place with new ACL — wider provider support
+		_, err = getClient().CopyObject(ctx, &s3.CopyObjectInput{
+			Bucket:            aws.String(bucket),
+			CopySource:        aws.String(bucket + "/" + key),
+			Key:               aws.String(key),
+			ACL:               cannedACL,
+			MetadataDirective: types.MetadataDirectiveCopy,
 		})
-		return
+		if err != nil {
+			renderPartial(w, "acl-panel", map[string]interface{}{
+				"Bucket":   bucket,
+				"Key":      key,
+				"ACLError": "Failed to update ACL: " + err.Error(),
+				"CanWrite": true,
+			})
+			return
+		}
 	}
 
 	isPublic := acl == "public-read"
+	// Cache the result immediately — avoids a round-trip HEAD check
+	aclStateCache.Store(aclCacheKey(bucket, key), isPublic)
+
 	pubURL := ""
 	if isPublic {
 		pubURL = publicURL(bucket, key)
@@ -908,19 +1034,56 @@ func SetACL(w http.ResponseWriter, r *http.Request) {
 		"Key":      key,
 		"IsPublic": isPublic,
 		"PublicURL": pubURL,
+		"CanWrite": true, // SetACL already verified write access above
 	})
 }
 
+// publicURL builds the publicly-accessible URL for an object.
+// S3-compatible providers (Hetzner, MinIO, R2, etc.) serve public objects at
+// virtual-hosted style: https://bucket.host/key — NOT path-style endpoint/bucket/key.
+// Path-style only works for authenticated API calls.
 func publicURL(bucket, key string) string {
 	session.mu.RLock()
 	endpoint := session.Endpoint
 	session.mu.RUnlock()
+
 	if endpoint == "" {
-		// AWS S3 virtual-hosted style
+		// AWS S3: virtual-hosted style
 		return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", bucket, key)
 	}
-	// Path style for custom endpoints
-	return fmt.Sprintf("%s/%s/%s", endpoint, bucket, key)
+
+	ep := normalizeEndpoint(strings.TrimRight(endpoint, "/"))
+	// Split into scheme + host: "https://hel1.your-objectstorage.com" → "https", "hel1.your-objectstorage.com"
+	if idx := strings.Index(ep, "://"); idx != -1 {
+		scheme := ep[:idx]
+		host := ep[idx+3:]
+		// Virtual-hosted style: https://bucket.host/key
+		return fmt.Sprintf("%s://%s.%s/%s", scheme, bucket, host, key)
+	}
+	// Fallback: path-style
+	return fmt.Sprintf("%s/%s/%s", ep, bucket, key)
+}
+
+// aclStateCache remembers the public/private state we last set or confirmed for each object.
+// Key: "bucket\x00key", Value: bool (true = public).
+// This ensures the copy-link button reflects the correct state immediately after SetACL,
+// without relying on a slow or unreliable HEAD request.
+var aclStateCache sync.Map
+
+func aclCacheKey(bucket, key string) string { return bucket + "\x00" + key }
+
+// resolvePublicState returns whether the object is publicly accessible.
+// Checks the in-memory cache first (populated by SetACL), then falls back to a HEAD request.
+func resolvePublicState(bucket, key string) bool {
+	ck := aclCacheKey(bucket, key)
+	if v, ok := aclStateCache.Load(ck); ok {
+		return v.(bool)
+	}
+	// Not in cache — do a HEAD request to the public URL
+	pub := publicURL(bucket, key)
+	isPublic := checkPublicAccess(pub)
+	aclStateCache.Store(ck, isPublic) // cache for next call
+	return isPublic
 }
 
 func SearchObjects(w http.ResponseWriter, r *http.Request) {

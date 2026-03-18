@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Settings — ObjectStore</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <script>
     tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { sans: ['Inter','sans-serif'] } } } }
@@ -215,13 +216,22 @@
             <td class="py-2.5 pr-4 text-xs text-slate-500 whitespace-nowrap">{{formatTime .CreatedAt}}</td>
             <td class="py-2.5 text-right">
               {{if not .IsAdmin}}
-              <form method="POST" action="/admin/users/{{.ID}}/delete"
-                onsubmit="return confirm('Delete user {{.Username}}? This cannot be undone.')">
-                <button type="submit"
-                  class="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1 rounded-lg transition">
-                  Delete
+              <div class="flex items-center justify-end gap-1">
+                <button
+                  hx-get="/admin/users/{{.ID}}/permissions"
+                  hx-target="#perms-panel-container"
+                  hx-swap="innerHTML"
+                  class="text-xs text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 px-2 py-1 rounded-lg transition">
+                  Permissions
                 </button>
-              </form>
+                <form method="POST" action="/admin/users/{{.ID}}/delete"
+                  onsubmit="return confirm('Delete user {{.Username}}? This cannot be undone.')">
+                  <button type="submit"
+                    class="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1 rounded-lg transition">
+                    Delete
+                  </button>
+                </form>
+              </div>
               {{end}}
             </td>
           </tr>
@@ -229,6 +239,9 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Permission editor — loaded via HTMX when "Permissions" is clicked -->
+    <div id="perms-panel-container"></div>
 
     <!-- Create new user form -->
     <div class="border-t border-slate-700 pt-5">

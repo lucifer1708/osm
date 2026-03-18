@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,6 +32,18 @@ type Session struct {
 	NeedsTOTP bool
 	CreatedAt time.Time
 	ExpiresAt time.Time
+}
+
+// Permission defines what a user can do on a bucket+prefix scope.
+// Bucket "*" means all buckets. Prefix "" means all paths within the bucket.
+// Access is "read" (list/download/preview) or "write" (read + upload/delete/rename/folder).
+type Permission struct {
+	ID        int64
+	UserID    int64
+	Bucket    string
+	Prefix    string
+	Access    string
+	CreatedAt time.Time
 }
 
 type AuditEntry struct {
@@ -108,6 +121,18 @@ func migrate(db *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
 	CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at DESC);
+
+	CREATE TABLE IF NOT EXISTS permissions (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		bucket     TEXT    NOT NULL DEFAULT '*',
+		prefix     TEXT    NOT NULL DEFAULT '',
+		access     TEXT    NOT NULL DEFAULT 'read',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, bucket, prefix)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_perm_user ON permissions(user_id);
 	`)
 	return err
 }
@@ -277,6 +302,88 @@ func LogEvent(userID *int64, username, event, ip, userAgent string) error {
 		userID, username, event, ip, userAgent,
 	)
 	return err
+}
+
+// ─── Permission operations ────────────────────────────────────────────────────
+
+func GetUserPermissions(userID int64) ([]Permission, error) {
+	rows, err := DB.Query(
+		`SELECT id, user_id, bucket, prefix, access, created_at
+		 FROM permissions WHERE user_id = ? ORDER BY bucket, prefix`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var perms []Permission
+	for rows.Next() {
+		var p Permission
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Bucket, &p.Prefix, &p.Access, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		perms = append(perms, p)
+	}
+	return perms, rows.Err()
+}
+
+// UpsertPermission creates or updates a permission rule.
+func UpsertPermission(userID int64, bucket, prefix, access string) error {
+	_, err := DB.Exec(
+		`INSERT INTO permissions (user_id, bucket, prefix, access)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(user_id, bucket, prefix) DO UPDATE SET access = excluded.access`,
+		userID, bucket, prefix, access,
+	)
+	return err
+}
+
+// DeletePermission removes a permission rule (verifying it belongs to the given user).
+func DeletePermission(id, userID int64) error {
+	_, err := DB.Exec(`DELETE FROM permissions WHERE id = ? AND user_id = ?`, id, userID)
+	return err
+}
+
+// EffectiveAccess returns the most specific access level ("read", "write", or "")
+// for the given user on the given bucket+path. Considers wildcard bucket "*" and
+// prefix inheritance (permission on "photos/" covers "photos/vacation/").
+func EffectiveAccess(userID int64, bucket, path string) string {
+	perms, err := GetUserPermissions(userID)
+	if err != nil || len(perms) == 0 {
+		return ""
+	}
+
+	type candidate struct {
+		access    string
+		specific  bool // true = named bucket, false = wildcard "*"
+		prefixLen int
+	}
+	var best *candidate
+
+	for _, p := range perms {
+		// bucket must match
+		if p.Bucket != "*" && p.Bucket != bucket {
+			continue
+		}
+		// prefix must be an ancestor-or-equal of path
+		if p.Prefix != "" && !strings.HasPrefix(path, p.Prefix) {
+			continue
+		}
+		c := candidate{
+			access:    p.Access,
+			specific:  p.Bucket == bucket,
+			prefixLen: len(p.Prefix),
+		}
+		if best == nil ||
+			(c.specific && !best.specific) ||
+			(c.specific == best.specific && c.prefixLen > best.prefixLen) {
+			best = &c
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.access
 }
 
 func GetAuditLog(limit int) ([]AuditEntry, error) {

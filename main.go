@@ -57,6 +57,9 @@ func main() {
 	mux.HandleFunc("POST /settings/totp/reset", handlers.ResetTOTP)
 	mux.HandleFunc("POST /admin/users", handlers.AdminCreateUser)
 	mux.HandleFunc("POST /admin/users/{id}/delete", handlers.AdminDeleteUser)
+	mux.HandleFunc("GET /admin/users/{id}/permissions", handlers.AdminGetPermissions)
+	mux.HandleFunc("POST /admin/users/{id}/permissions", handlers.AdminSetPermission)
+	mux.HandleFunc("POST /admin/permissions/delete", handlers.AdminDeletePermission)
 
 	// Storage app
 	mux.HandleFunc("GET /{$}", handlers.Index)

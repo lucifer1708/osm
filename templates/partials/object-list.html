@@ -54,6 +54,7 @@
 
     <!-- Actions -->
     <div class="flex items-center gap-1.5 flex-shrink-0">
+      {{if .CanWrite}}
       <button onclick="showUploadModal('{{.Bucket}}', '{{.Prefix}}')"
         class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -68,6 +69,7 @@
         </svg>
         Folder
       </button>
+      {{end}}
       <button
         hx-get="/buckets/{{.Bucket}}/objects?prefix={{.Prefix}}&search={{.Search}}"
         hx-target="#object-panel"
@@ -84,9 +86,11 @@
 <!-- Drop Zone -->
 <div id="drop-zone-{{.Bucket}}"
   class="drop-zone mx-4 mt-3 border-2 border-dashed border-transparent rounded-xl transition-all"
+  {{if .CanWrite}}
   ondragover="event.preventDefault();this.classList.add('dragover','border-primary-400','bg-primary-50','dark:bg-primary-900/20')"
   ondragleave="this.classList.remove('dragover','border-primary-400','bg-primary-50','dark:bg-primary-900/20')"
-  ondrop="event.preventDefault();this.classList.remove('dragover','border-primary-400','bg-primary-50','dark:bg-primary-900/20');handleGlobalDrop(event,'{{.Bucket}}','{{.Prefix}}')">
+  ondrop="event.preventDefault();this.classList.remove('dragover','border-primary-400','bg-primary-50','dark:bg-primary-900/20');handleGlobalDrop(event,'{{.Bucket}}','{{.Prefix}}')"
+  {{end}}>
 
 {{if .Objects}}
 <!-- File Table -->
@@ -198,6 +202,7 @@
               </svg>
             </button>
             {{end}}
+            {{if $.CanWrite}}
             <!-- Rename -->
             <button onclick="showRenameModal('{{$.Bucket}}','{{.Key}}','{{$.Prefix}}')"
               class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-500 dark:text-gray-400" title="Rename">
@@ -212,6 +217,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
               </svg>
             </button>
+            {{end}}
           </div>
         </td>
       </tr>
@@ -232,6 +238,7 @@
   <p class="text-sm text-gray-500 mt-1">Try a different search term</p>
   {{else}}
   <h3 class="text-base font-medium text-gray-700 dark:text-gray-300">This folder is empty</h3>
+  {{if .CanWrite}}
   <p class="text-sm text-gray-500 mt-1">Upload files or drop them here</p>
   <button onclick="showUploadModal('{{.Bucket}}','{{.Prefix}}')"
     class="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white text-sm rounded-xl hover:bg-primary-700 transition-colors">
@@ -240,6 +247,9 @@
     </svg>
     Upload Files
   </button>
+  {{else}}
+  <p class="text-sm text-gray-500 mt-1">You have read-only access to this folder</p>
+  {{end}}
   {{end}}
 </div>
 {{end}}

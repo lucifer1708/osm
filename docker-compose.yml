@@ -1,0 +1,30 @@
+services:
+  osm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: object-storage-manager:latest
+    container_name: osm
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      # Persist SQLite database across restarts
+      - osm-data:/data
+    env_file:
+      # Storage credentials (ENDPOINT, ACCESS_KEY, SECRET_KEY, REGION)
+      # Copy .env.example to .env and fill in your values
+      - .env
+    environment:
+      - PORT=8080
+      - DB_PATH=/data/osm.db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  osm-data:
+    driver: local

@@ -42,6 +42,7 @@
     </a>
   </div>
 
+  {{if .CanWrite}}
   <!-- Make private -->
   <form hx-post="/buckets/{{.Bucket}}/acl/{{.Key}}" hx-target="#acl-panel-content" hx-swap="outerHTML">
     <input type="hidden" name="acl" value="private">
@@ -51,8 +52,10 @@
       Make Private
     </button>
   </form>
+  {{end}}
 
   {{else}}
+  {{if .CanWrite}}
   <!-- Make public -->
   <form hx-post="/buckets/{{.Bucket}}/acl/{{.Key}}" hx-target="#acl-panel-content" hx-swap="outerHTML">
     <input type="hidden" name="acl" value="public-read">
@@ -62,6 +65,7 @@
       Make Public
     </button>
   </form>
+  {{end}}
   {{end}}
 </div>
 {{end}}
