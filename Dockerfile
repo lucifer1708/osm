@@ -1,13 +1,12 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM golang:1.24.2-alpine AS builder
+FROM golang:1.25 AS builder
 
 WORKDIR /build
 
-# Install build tools (needed for modernc.org/sqlite pure-Go, no CGO required)
-RUN apk add --no-cache git
-
 # Cache dependencies first
 COPY go.mod go.sum ./
+# Override the go directive so golang:1.24.2 can build (go mod tidy sets it to 1.25)
+RUN go mod edit -go=1.24 -toolchain=none
 RUN go mod download
 
 # Copy source and build a statically-linked binary

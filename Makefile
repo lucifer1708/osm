@@ -1,8 +1,10 @@
-APP  := osm
-BIN  := ./bin/$(APP)
-PORT ?= 8081
+APP      := osm
+BIN      := ./bin/$(APP)
+PORT     ?= 8081
+REGISTRY := docker.euclidprotocol.com
+IMAGE    := $(REGISTRY)/osm
 
-.PHONY: all build run dev start clean setup create-user docker-build docker-up docker-down docker-logs help
+.PHONY: all build run dev start clean setup create-user docker-build docker-up docker-down docker-logs docker-push help
 
 all: build
 
@@ -46,9 +48,17 @@ setup:
 create-user:
 	@go run ./cmd/create-user
 
-## Build Docker image
+## Build Docker image (local, current platform)
 docker-build:
 	docker compose build
+
+## Build multi-platform image and push to registry
+docker-push:
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-t $(IMAGE):latest \
+		--push \
+		.
 
 ## Start with Docker Compose (detached)
 docker-up:
@@ -77,11 +87,12 @@ help:
 	@echo "  make dev          Live-reload with air"
 	@echo "  make build        Compile → ./bin/osm"
 	@echo "  make start        Build + run binary"
-	@echo "  make docker-build Build Docker image
-  make docker-up    Start via Docker Compose
-  make docker-down  Stop Docker Compose stack
-  make docker-logs  Tail container logs
-  make clean        Remove build artifacts"
+	@echo "  make docker-build Build Docker image (local)"
+	@echo "  make docker-push  Build amd64+arm64 and push to $(REGISTRY)"
+	@echo "  make docker-up    Start via Docker Compose"
+	@echo "  make docker-down  Stop Docker Compose stack"
+	@echo "  make docker-logs  Tail container logs"
+	@echo "  make clean        Remove build artifacts"
 	@echo ""
 	@echo "  PORT=9090 make run    override port"
 	@echo "  DB_PATH=/tmp/x.db make run    custom DB path"

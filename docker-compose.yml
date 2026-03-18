@@ -1,9 +1,6 @@
 services:
   osm:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: object-storage-manager:latest
+    image: docker.euclidprotocol.com/osm:latest
     container_name: osm
     restart: unless-stopped
     ports:
