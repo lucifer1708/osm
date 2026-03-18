@@ -259,6 +259,11 @@ function showUploadModal(bucket, prefix, preloadedFiles) {
                 <div id="upload-progress-bar" class="bg-primary-500 h-2 rounded-full progress-bar" style="width:0%"></div>
               </div>
             </div>
+            <label class="flex items-center gap-2 mb-4 cursor-pointer">
+              <input type="checkbox" name="acl" value="public-read" id="upload-acl-public"
+                class="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-gray-500">
+              <span class="text-sm text-gray-700 dark:text-gray-300">Make public <span class="text-xs text-gray-500">(anyone with the link can view)</span></span>
+            </label>
             <div class="flex gap-3">
               <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">
                 Upload
@@ -371,6 +376,7 @@ function showRenameModal(bucket, key, prefix) {
       </div>
     </div>
   `);
+  htmx.process(document.querySelector('.fixed.inset-0'));
 }
 
 function showPreviewModal(bucket, key) {
@@ -443,7 +449,7 @@ function confirmDelete(msg, hxDelete, hxTarget) {
         </div>
         <div class="flex gap-3">
           <button onclick="closeModal()" class="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
-          <button hx-delete="${hxDelete}" hx-target="${hxTarget}" hx-swap="innerHTML" onclick="closeModal()"
+          <button hx-delete="${hxDelete}" hx-target="${hxTarget}" hx-swap="innerHTML" hx-on::after-request="closeModal()"
             class="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors">
             Delete
           </button>
@@ -509,6 +515,47 @@ function showCreateFolderModal(bucket, prefix) {
               <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
             </div>
           </form>
+        </div>
+      </div>
+    </div>
+  `);
+  htmx.process(document.querySelector('.fixed.inset-0'));
+}
+
+function copyPublicLink(bucket, key) {
+  fetch(`/buckets/${bucket}/acl-json/${key}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.public && data.url) {
+        navigator.clipboard.writeText(data.url).then(() => showToast('Public link copied!', true));
+      } else {
+        showToast('File is private — use Access Control to make it public', false);
+      }
+    })
+    .catch(() => showToast('Failed to check file access', false));
+}
+
+function showACLModal(bucket, key) {
+  openModal(`
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold">Access Control</h3>
+          <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-4 truncate font-mono">${escapeHtml(key)}</p>
+          <div id="acl-panel-content"
+            hx-get="/buckets/${bucket}/acl/${key}"
+            hx-trigger="load"
+            hx-swap="outerHTML">
+            <div class="flex items-center justify-center py-8 text-gray-400 text-sm gap-2">
+              <span class="spinner"></span>
+              Loading...
+            </div>
+          </div>
         </div>
       </div>
     </div>

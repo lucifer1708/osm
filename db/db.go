@@ -19,6 +19,7 @@ type User struct {
 	Username     string
 	PasswordHash string
 	TOTPSecret   string
+	IsAdmin      bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -60,6 +61,10 @@ func Init(path string) error {
 	if err := migrate(db); err != nil {
 		return fmt.Errorf("db: migrate: %w", err)
 	}
+	// Idempotent: add is_admin column for existing DBs (error ignored if column exists)
+	db.Exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`)
+	// The first registered user is always admin
+	db.Exec(`UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users) AND is_admin = 0`)
 
 	DB = db
 	return nil
@@ -75,6 +80,7 @@ func migrate(db *sql.DB) error {
 		username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
 		password_hash TEXT    NOT NULL,
 		totp_secret   TEXT    NOT NULL DEFAULT '',
+		is_admin      INTEGER NOT NULL DEFAULT 0,
 		created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -109,9 +115,16 @@ func migrate(db *sql.DB) error {
 // ─── User operations ──────────────────────────────────────────────────────────
 
 func CreateUser(username, passwordHash string) (*User, error) {
+	// First user ever created gets admin rights
+	var count int
+	DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	isAdmin := 0
+	if count == 0 {
+		isAdmin = 1
+	}
 	res, err := DB.Exec(
-		`INSERT INTO users (username, password_hash) VALUES (?, ?)`,
-		username, passwordHash,
+		`INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)`,
+		username, passwordHash, isAdmin,
 	)
 	if err != nil {
 		return nil, err
@@ -122,33 +135,37 @@ func CreateUser(username, passwordHash string) (*User, error) {
 
 func GetUserByUsername(username string) (*User, error) {
 	u := &User{}
+	var isAdmin int
 	err := DB.QueryRow(
-		`SELECT id, username, password_hash, totp_secret, created_at, updated_at
+		`SELECT id, username, password_hash, totp_secret, is_admin, created_at, updated_at
 		 FROM users WHERE username = ? COLLATE NOCASE`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &isAdmin, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	u.IsAdmin = isAdmin == 1
 	return u, err
 }
 
 func GetUserByID(id int64) (*User, error) {
 	u := &User{}
+	var isAdmin int
 	err := DB.QueryRow(
-		`SELECT id, username, password_hash, totp_secret, created_at, updated_at
+		`SELECT id, username, password_hash, totp_secret, is_admin, created_at, updated_at
 		 FROM users WHERE id = ?`,
 		id,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &isAdmin, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	u.IsAdmin = isAdmin == 1
 	return u, err
 }
 
 func GetAllUsers() ([]User, error) {
 	rows, err := DB.Query(
-		`SELECT id, username, password_hash, totp_secret, created_at, updated_at
+		`SELECT id, username, password_hash, totp_secret, is_admin, created_at, updated_at
 		 FROM users ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -158,9 +175,11 @@ func GetAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		var isAdmin int
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.TOTPSecret, &isAdmin, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
+		u.IsAdmin = isAdmin == 1
 		users = append(users, u)
 	}
 	return users, rows.Err()

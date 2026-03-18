@@ -486,6 +486,7 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := r.FormValue("prefix")
+	makePublic := r.FormValue("acl") == "public-read"
 	files := r.MultipartForm.File["files"]
 
 	if len(files) == 0 {
@@ -513,13 +514,18 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 			contentType = "application/octet-stream"
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		_, err = getClient().PutObject(ctx, &s3.PutObjectInput{
+		input := &s3.PutObjectInput{
 			Bucket:      aws.String(bucket),
 			Key:         aws.String(key),
 			Body:        f,
 			ContentType: aws.String(contentType),
-		})
+		}
+		if makePublic {
+			input.ACL = types.ObjectCannedACLPublicRead
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		_, err = getClient().PutObject(ctx, input)
 		cancel()
 		if err != nil {
 			errs = append(errs, fh.Filename+": "+err.Error())
@@ -792,6 +798,129 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 		"Toast":     "Operation completed successfully",
 		"ToastOK":   true,
 	})
+}
+
+// checkPublicAccess does an unauthenticated HEAD request to determine if the object is publicly readable.
+// This is more reliable than GetObjectAcl which some S3-compatible providers don't implement correctly.
+func checkPublicAccess(url string) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// GetACL checks the ACL for a single object and returns an HTML fragment.
+func GetACL(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		renderError(w, "Not connected")
+		return
+	}
+	bucket := r.PathValue("bucket")
+	key := r.PathValue("key")
+
+	pubURL := publicURL(bucket, key)
+	isPublic := checkPublicAccess(pubURL)
+	if !isPublic {
+		pubURL = ""
+	}
+
+	renderPartial(w, "acl-panel", map[string]interface{}{
+		"Bucket":    bucket,
+		"Key":       key,
+		"IsPublic":  isPublic,
+		"PublicURL": pubURL,
+		"ACLError":  "",
+	})
+}
+
+// GetACLJSON returns JSON with public status and URL — used by the copy-link button.
+func GetACLJSON(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"public": false, "url": ""})
+		return
+	}
+	bucket := r.PathValue("bucket")
+	key := r.PathValue("key")
+
+	pubURL := publicURL(bucket, key)
+	isPublic := checkPublicAccess(pubURL)
+	if !isPublic {
+		pubURL = ""
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"public": isPublic, "url": pubURL})
+}
+
+// SetACL sets public-read or private ACL on an object.
+func SetACL(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		renderError(w, "Not connected")
+		return
+	}
+	bucket := r.PathValue("bucket")
+	key := r.PathValue("key")
+	if err := r.ParseForm(); err != nil {
+		renderError(w, err.Error())
+		return
+	}
+	acl := r.FormValue("acl") // "public-read" or "private"
+
+	var cannedACL types.ObjectCannedACL
+	if acl == "public-read" {
+		cannedACL = types.ObjectCannedACLPublicRead
+	} else {
+		cannedACL = types.ObjectCannedACLPrivate
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := getClient().PutObjectAcl(ctx, &s3.PutObjectAclInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		ACL:    cannedACL,
+	})
+	if err != nil {
+		renderPartial(w, "acl-panel", map[string]interface{}{
+			"Bucket":   bucket,
+			"Key":      key,
+			"ACLError": "Failed to update ACL: " + err.Error(),
+		})
+		return
+	}
+
+	isPublic := acl == "public-read"
+	pubURL := ""
+	if isPublic {
+		pubURL = publicURL(bucket, key)
+	}
+	renderPartial(w, "acl-panel", map[string]interface{}{
+		"Bucket":   bucket,
+		"Key":      key,
+		"IsPublic": isPublic,
+		"PublicURL": pubURL,
+	})
+}
+
+func publicURL(bucket, key string) string {
+	session.mu.RLock()
+	endpoint := session.Endpoint
+	session.mu.RUnlock()
+	if endpoint == "" {
+		// AWS S3 virtual-hosted style
+		return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", bucket, key)
+	}
+	// Path style for custom endpoints
+	return fmt.Sprintf("%s/%s/%s", endpoint, bucket, key)
 }
 
 func SearchObjects(w http.ResponseWriter, r *http.Request) {

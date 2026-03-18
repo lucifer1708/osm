@@ -50,6 +50,26 @@
     {{.Error}}
   </div>
   {{end}}
+  <div id="success-banner" class="hidden flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-400 text-sm rounded-xl px-4 py-3">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+    <span id="success-msg"></span>
+  </div>
+  <script>
+    (function() {
+      const p = new URLSearchParams(location.search);
+      const s = p.get('success');
+      const msgs = { user_created: 'User created successfully.', user_deleted: 'User deleted successfully.' };
+      if (msgs[s]) {
+        const el = document.getElementById('success-banner');
+        document.getElementById('success-msg').textContent = msgs[s];
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        history.replaceState({}, '', '/settings');
+      }
+    })();
+  </script>
 
   <!-- Profile -->
   <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
@@ -143,6 +163,91 @@
       {{end}}
     </div>
   </div>
+
+  {{if .IsAdmin}}
+  <!-- User Management (admin only) -->
+  <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+      </svg>
+      User Management
+      <span class="text-xs text-slate-500 font-normal bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded-full ml-1">Admin</span>
+    </h2>
+
+    <!-- Existing users table -->
+    <div class="mb-6 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-700">
+            <th class="text-left pb-2 pr-4">Username</th>
+            <th class="text-left pb-2 pr-4">Role</th>
+            <th class="text-left pb-2 pr-4">2FA</th>
+            <th class="text-left pb-2 pr-4">Created</th>
+            <th class="pb-2"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/50">
+          {{range .AllUsers}}
+          <tr class="hover:bg-slate-700/30 transition">
+            <td class="py-2.5 pr-4">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                  {{initial .Username}}
+                </div>
+                <span class="font-medium text-slate-200">{{.Username}}</span>
+              </div>
+            </td>
+            <td class="py-2.5 pr-4">
+              {{if .IsAdmin}}
+              <span class="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">Admin</span>
+              {{else}}
+              <span class="text-xs text-slate-500">User</span>
+              {{end}}
+            </td>
+            <td class="py-2.5 pr-4">
+              {{if .TOTPSecret}}
+              <span class="text-xs text-green-400">Enabled</span>
+              {{else}}
+              <span class="text-xs text-slate-500">—</span>
+              {{end}}
+            </td>
+            <td class="py-2.5 pr-4 text-xs text-slate-500 whitespace-nowrap">{{formatTime .CreatedAt}}</td>
+            <td class="py-2.5 text-right">
+              {{if not .IsAdmin}}
+              <form method="POST" action="/admin/users/{{.ID}}/delete"
+                onsubmit="return confirm('Delete user {{.Username}}? This cannot be undone.')">
+                <button type="submit"
+                  class="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1 rounded-lg transition">
+                  Delete
+                </button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Create new user form -->
+    <div class="border-t border-slate-700 pt-5">
+      <h3 class="text-sm font-medium text-slate-300 mb-3">Create New Account</h3>
+      <form method="POST" action="/admin/users" class="flex flex-col sm:flex-row gap-3">
+        <input type="text" name="username" required placeholder="Username" minlength="2"
+          autocomplete="off"
+          class="flex-1 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition placeholder-slate-500">
+        <input type="password" name="password" required placeholder="Password (min 8 chars)" minlength="8"
+          autocomplete="new-password"
+          class="flex-1 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition placeholder-slate-500">
+        <button type="submit"
+          class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
+          Create User
+        </button>
+      </form>
+    </div>
+  </div>
+  {{end}}
 
   <!-- Audit log -->
   <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">

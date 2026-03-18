@@ -55,6 +55,8 @@ func main() {
 	mux.HandleFunc("GET /settings", handlers.SettingsPage)
 	mux.HandleFunc("POST /settings/password", handlers.ChangePassword)
 	mux.HandleFunc("POST /settings/totp/reset", handlers.ResetTOTP)
+	mux.HandleFunc("POST /admin/users", handlers.AdminCreateUser)
+	mux.HandleFunc("POST /admin/users/{id}/delete", handlers.AdminDeleteUser)
 
 	// Storage app
 	mux.HandleFunc("GET /{$}", handlers.Index)
@@ -73,6 +75,9 @@ func main() {
 	mux.HandleFunc("POST /buckets/{bucket}/folder", handlers.CreateFolder)
 	mux.HandleFunc("GET /buckets/{bucket}/preview/{key...}", handlers.PreviewObject)
 	mux.HandleFunc("POST /buckets/{bucket}/copy", handlers.CopyObject)
+	mux.HandleFunc("GET /buckets/{bucket}/acl/{key...}", handlers.GetACL)
+	mux.HandleFunc("POST /buckets/{bucket}/acl/{key...}", handlers.SetACL)
+	mux.HandleFunc("GET /buckets/{bucket}/acl-json/{key...}", handlers.GetACLJSON)
 	mux.HandleFunc("GET /search", handlers.SearchObjects)
 
 	log.Printf("Object Storage Manager → http://localhost:%s", port)

@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -343,11 +344,85 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auditLog, _ := db.GetAuditLog(50)
-	renderAuthTemplate(w, "settings.html", map[string]interface{}{
+	data := map[string]interface{}{
 		"User":     user,
 		"AuditLog": auditLog,
 		"HasTOTP":  user.TOTPSecret != "",
-	})
+		"IsAdmin":  user.IsAdmin,
+	}
+	if user.IsAdmin {
+		allUsers, _ := db.GetAllUsers()
+		data["AllUsers"] = allUsers
+	}
+	renderAuthTemplate(w, "settings.html", data)
+}
+
+// AdminCreateUser — admin-only: create a new user account.
+func AdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromRequest(r)
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user, _ := db.GetUserByID(sess.UserID)
+	if user == nil || !user.IsAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		adminSettingsError(w, sess, "Invalid request")
+		return
+	}
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	if len(username) < 2 {
+		adminSettingsError(w, sess, "Username must be at least 2 characters")
+		return
+	}
+	if len(password) < 8 {
+		adminSettingsError(w, sess, "Password must be at least 8 characters")
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		adminSettingsError(w, sess, "Failed to hash password")
+		return
+	}
+	newUser, err := db.CreateUser(username, string(hash))
+	if err != nil {
+		adminSettingsError(w, sess, "Failed to create user: "+err.Error())
+		return
+	}
+	db.LogEvent(&sess.UserID, sess.Username, "admin_created_user:"+newUser.Username, clientIP(r), r.UserAgent())
+	http.Redirect(w, r, "/settings?success=user_created", http.StatusSeeOther)
+}
+
+// AdminDeleteUser — admin-only: delete a user account (cannot delete self).
+func AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromRequest(r)
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	admin, _ := db.GetUserByID(sess.UserID)
+	if admin == nil || !admin.IsAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	targetID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if targetID == sess.UserID {
+		adminSettingsError(w, sess, "You cannot delete your own account")
+		return
+	}
+	target, _ := db.GetUserByID(targetID)
+	if target == nil {
+		adminSettingsError(w, sess, "User not found")
+		return
+	}
+	db.DeleteUserSessions(targetID)
+	db.DeleteUser(targetID)
+	db.LogEvent(&sess.UserID, sess.Username, "admin_deleted_user:"+target.Username, clientIP(r), r.UserAgent())
+	http.Redirect(w, r, "/settings?success=user_deleted", http.StatusSeeOther)
 }
 
 func ChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -533,11 +608,21 @@ func clientIP(r *http.Request) string {
 func settingsError(w http.ResponseWriter, sess *db.Session, msg string) {
 	user, _ := db.GetUserByID(sess.UserID)
 	auditLog, _ := db.GetAuditLog(50)
-	renderAuthError(w, "settings.html", msg, map[string]interface{}{
+	data := map[string]interface{}{
 		"User":     user,
 		"AuditLog": auditLog,
 		"HasTOTP":  user != nil && user.TOTPSecret != "",
-	})
+		"IsAdmin":  user != nil && user.IsAdmin,
+	}
+	if user != nil && user.IsAdmin {
+		allUsers, _ := db.GetAllUsers()
+		data["AllUsers"] = allUsers
+	}
+	renderAuthError(w, "settings.html", msg, data)
+}
+
+func adminSettingsError(w http.ResponseWriter, sess *db.Session, msg string) {
+	settingsError(w, sess, msg)
 }
 
 // ─── GenPasswordHash — used by cmd/create-user ────────────────────────────────
