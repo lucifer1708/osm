@@ -1,6 +1,6 @@
 module github.com/lucifer1708/object_storage_manager
 
-go 1.25.5
+go 1.22
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.4 // indirect
