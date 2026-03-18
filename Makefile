@@ -1,8 +1,9 @@
-APP      := osm
-BIN      := ./bin/$(APP)
-PORT     ?= 8081
-REGISTRY := docker.euclidprotocol.com
-IMAGE    := $(REGISTRY)/osm
+APP        := osm
+BIN        := ./bin/$(APP)
+PORT       ?= 8081
+FILES_PORT ?= 9090
+REGISTRY   := docker.euclidprotocol.com
+IMAGE      := $(REGISTRY)/osm
 
 .PHONY: all build run dev start clean setup create-user docker-build docker-up docker-down docker-logs docker-push help
 
@@ -16,7 +17,7 @@ build:
 
 ## Run from source (loads .env automatically)
 run:
-	PORT=$(PORT) go run .
+	PORT=$(PORT) FILES_PORT=$(FILES_PORT) go run .
 
 ## Live-reload dev server (installs air if missing)
 dev:
@@ -40,7 +41,7 @@ setup:
 	@mkdir -p data
 	@echo ""
 	@echo "Next steps:"
-	@echo "  1. Edit .env       — add your storage endpoint + keys"
+	@echo "  1. Edit .env        — add your storage endpoint + keys"
 	@echo "  2. make create-user — create your first admin account"
 	@echo "  3. make run"
 
@@ -52,7 +53,7 @@ create-user:
 docker-build:
 	docker compose build
 
-## Build multi-platform image and push to registry
+## Build multi-platform image (amd64 + arm64) and push to registry
 docker-push:
 	docker buildx build \
 		--platform linux/amd64,linux/arm64 \
@@ -63,7 +64,8 @@ docker-push:
 ## Start with Docker Compose (detached)
 docker-up:
 	docker compose up -d
-	@echo "Running at http://localhost:$${PORT:-8080}"
+	@echo "App:         http://localhost:$${PORT:-8080}"
+	@echo "Files server: http://localhost:$${FILES_PORT:-9090}/files/<bucket>/<key>"
 
 ## Stop Docker Compose stack
 docker-down:
@@ -81,19 +83,21 @@ clean:
 ## Print usage
 help:
 	@echo ""
-	@echo "  make setup        First-time setup (copy .env, tidy deps)"
-	@echo "  make create-user  Add a user to the database"
-	@echo "  make run          Run from source   (PORT=$(PORT))"
-	@echo "  make dev          Live-reload with air"
-	@echo "  make build        Compile → ./bin/osm"
-	@echo "  make start        Build + run binary"
-	@echo "  make docker-build Build Docker image (local)"
-	@echo "  make docker-push  Build amd64+arm64 and push to $(REGISTRY)"
-	@echo "  make docker-up    Start via Docker Compose"
-	@echo "  make docker-down  Stop Docker Compose stack"
-	@echo "  make docker-logs  Tail container logs"
-	@echo "  make clean        Remove build artifacts"
+	@echo "  make setup         First-time setup (copy .env, tidy deps)"
+	@echo "  make create-user   Add a user to the database"
+	@echo "  make run           Run from source   (PORT=$(PORT) FILES_PORT=$(FILES_PORT))"
+	@echo "  make dev           Live-reload with air"
+	@echo "  make build         Compile → ./bin/osm"
+	@echo "  make start         Build + run binary"
+	@echo "  make docker-build  Build Docker image (local)"
+	@echo "  make docker-push   Build amd64+arm64 and push to $(REGISTRY)"
+	@echo "  make docker-up     Start via Docker Compose"
+	@echo "  make docker-down   Stop Docker Compose stack"
+	@echo "  make docker-logs   Tail container logs"
+	@echo "  make clean         Remove build artifacts"
 	@echo ""
-	@echo "  PORT=9090 make run    override port"
-	@echo "  DB_PATH=/tmp/x.db make run    custom DB path"
+	@echo "  PORT=9090 make run                   override app port"
+	@echo "  FILES_PORT=9091 make run              override files server port"
+	@echo "  DB_PATH=/tmp/x.db make run            custom DB path"
+	@echo "  PUBLIC_FILES_HOST=static.example.com  CDN domain for public file URLs"
 	@echo ""

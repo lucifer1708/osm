@@ -23,6 +23,8 @@ import (
 
 const sessionTTL = 24 * time.Hour
 const cookieName = "osm_session"
+const trustedDeviceCookieName = "osm_2fa_trusted"
+const trustedDeviceTTL = 30 * 24 * time.Hour
 
 // ctxKeySession is the context key for the authenticated session.
 type ctxKeySession struct{}
@@ -193,7 +195,18 @@ func LoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Password correct
 	if user.TOTPSecret != "" {
-		// TOTP required — create a partial session
+		// Check if this device has already passed TOTP before
+		if c, err := r.Cookie(trustedDeviceCookieName); err == nil && db.IsTrustedDevice(user.ID, c.Value) {
+			// Trusted device — skip TOTP, go straight to full session
+			if err := newSession(w, user.ID, false); err != nil {
+				renderAuthError(w, "login.html", "Session error", nil)
+				return
+			}
+			db.LogEvent(&user.ID, user.Username, "login_success", ip, ua)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		// Unknown device — TOTP required
 		if err := newSession(w, user.ID, true); err != nil {
 			renderAuthError(w, "login.html", "Session error", nil)
 			return
@@ -219,7 +232,12 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 		}
 		db.DeleteSession(c.Value)
 	}
+	// Remove this device's trusted token on logout
+	if c, err := r.Cookie(trustedDeviceCookieName); err == nil {
+		db.DeleteTrustedDevice(c.Value)
+	}
 	clearCookie(w)
+	http.SetCookie(w, &http.Cookie{Name: trustedDeviceCookieName, Value: "", Path: "/", MaxAge: -1})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -262,6 +280,21 @@ func TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 	c, _ := r.Cookie(cookieName)
 	db.PromoteSession(c.Value)
 	db.LogEvent(&user.ID, user.Username, "login_success", clientIP(r), r.UserAgent())
+
+	// Mark this device as trusted so future logins skip TOTP
+	if deviceToken, err := randomHex(32); err == nil {
+		if db.CreateTrustedDevice(user.ID, deviceToken, trustedDeviceTTL) == nil {
+			http.SetCookie(w, &http.Cookie{
+				Name:     trustedDeviceCookieName,
+				Value:    deviceToken,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   int(trustedDeviceTTL.Seconds()),
+			})
+		}
+	}
+
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -475,6 +508,8 @@ func ResetTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.SetTOTPSecret(sess.UserID, "")
+	// Revoke all trusted devices — 2FA must be re-verified on all devices
+	db.DeleteUserTrustedDevices(sess.UserID)
 	db.LogEvent(&sess.UserID, sess.Username, "totp_reset", clientIP(r), r.UserAgent())
 	http.Redirect(w, r, "/totp/setup", http.StatusSeeOther)
 }

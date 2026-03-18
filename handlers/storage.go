@@ -9,6 +9,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -216,6 +217,7 @@ func funcMap() template.FuncMap {
 		},
 		"add": func(a, b int) int { return a + b },
 		"sub": func(a, b int) int { return a - b },
+		"urlEncode":  url.QueryEscape,
 		"join": strings.Join,
 		"trimPrefix": strings.TrimPrefix,
 		"trimSuffix": strings.TrimSuffix,
@@ -485,35 +487,67 @@ func ListObjects(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 	sortBy := r.URL.Query().Get("sort")
 	sortDir := r.URL.Query().Get("dir")
+	token := r.URL.Query().Get("token") // S3 continuation token for infinite scroll
 
 	if !canAccess(r, bucket, prefix, "read") {
 		denyAccess(w, r)
 		return
 	}
 
-	objects, err := listObjects(bucket, prefix)
-	if err != nil {
-		renderError(w, err.Error())
+	// Infinite scroll "load more" — return just the next batch of rows.
+	// Only used in browse mode (no search, no non-default sort).
+	if token != "" && search == "" {
+		objects, nextToken, err := listObjectsPage(bucket, prefix, token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		renderPartial(w, "object-rows", map[string]interface{}{
+			"Bucket":    bucket,
+			"Prefix":    prefix,
+			"Objects":   objects,
+			"NextToken": nextToken,
+			"SortBy":    sortBy,
+			"SortDir":   sortDir,
+			"CanWrite":  canAccess(r, bucket, prefix, "write"),
+		})
 		return
 	}
 
-	// Filter by search
-	if search != "" {
-		var filtered []ObjectInfo
-		for _, o := range objects {
-			name := filepath.Base(strings.TrimSuffix(o.Key, "/"))
-			if strings.Contains(strings.ToLower(name), strings.ToLower(search)) {
-				filtered = append(filtered, o)
-			}
+	var objects []ObjectInfo
+	var nextToken string
+
+	// Search or non-default sort requires loading all objects for correctness.
+	defaultSort := (sortBy == "" || sortBy == "name") && (sortDir == "" || sortDir == "asc")
+	if search != "" || !defaultSort {
+		var err error
+		objects, err = listObjects(bucket, prefix)
+		if err != nil {
+			renderError(w, err.Error())
+			return
 		}
-		objects = filtered
+		if search != "" {
+			var filtered []ObjectInfo
+			for _, o := range objects {
+				name := filepath.Base(strings.TrimSuffix(o.Key, "/"))
+				if strings.Contains(strings.ToLower(name), strings.ToLower(search)) {
+					filtered = append(filtered, o)
+				}
+			}
+			objects = filtered
+		}
+		sortObjects(objects, sortBy, sortDir)
+	} else {
+		// Browse mode: load first page only.
+		var err error
+		objects, nextToken, err = listObjectsPage(bucket, prefix, "")
+		if err != nil {
+			renderError(w, err.Error())
+			return
+		}
 	}
 
-	// Sort
-	sortObjects(objects, sortBy, sortDir)
-
 	totalSize, fileCount := objectStats(objects)
-
 	renderPartial(w, "object-list", map[string]interface{}{
 		"Bucket":    bucket,
 		"Prefix":    prefix,
@@ -523,6 +557,8 @@ func ListObjects(w http.ResponseWriter, r *http.Request) {
 		"SortDir":   sortDir,
 		"TotalSize": totalSize,
 		"FileCount": fileCount,
+		"NextToken": nextToken,
+		"HasMore":   nextToken != "",
 		"CanWrite":  canAccess(r, bucket, prefix, "write"),
 	})
 }
@@ -1232,6 +1268,56 @@ func listBuckets() ([]types.Bucket, error) {
 	return out.Buckets, nil
 }
 
+const objectPageSize = 100
+
+// listObjectsPage fetches one page of objects (up to objectPageSize items).
+// Returns the objects, the continuation token for the next page (empty if last page), and any error.
+func listObjectsPage(bucket, prefix, token string) ([]ObjectInfo, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	input := &s3.ListObjectsV2Input{
+		Bucket:    aws.String(bucket),
+		Prefix:    aws.String(prefix),
+		Delimiter: aws.String("/"),
+		MaxKeys:   aws.Int32(objectPageSize),
+	}
+	if token != "" {
+		input.ContinuationToken = aws.String(token)
+	}
+
+	out, err := getClient().ListObjectsV2(ctx, input)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to list objects: %w", err)
+	}
+
+	var objects []ObjectInfo
+	for _, cp := range out.CommonPrefixes {
+		objects = append(objects, ObjectInfo{
+			Key:      aws.ToString(cp.Prefix),
+			IsFolder: true,
+		})
+	}
+	for _, obj := range out.Contents {
+		key := aws.ToString(obj.Key)
+		if key == prefix {
+			continue
+		}
+		objects = append(objects, ObjectInfo{
+			Key:          key,
+			Size:         aws.ToInt64(obj.Size),
+			LastModified: obj.LastModified,
+			ETag:         strings.Trim(aws.ToString(obj.ETag), `"`),
+		})
+	}
+
+	nextToken := ""
+	if aws.ToBool(out.IsTruncated) {
+		nextToken = aws.ToString(out.NextContinuationToken)
+	}
+	return objects, nextToken, nil
+}
+
 func listObjects(bucket, prefix string) ([]ObjectInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1374,6 +1460,7 @@ func renderTemplate(w http.ResponseWriter, name string, data interface{}) {
 		"templates/index.html",
 		"templates/partials/bucket-list.html",
 		"templates/partials/object-list.html",
+		"templates/partials/object-rows.html",
 		"templates/partials/search-results.html",
 	))
 	if err := t.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -1383,9 +1470,17 @@ func renderTemplate(w http.ResponseWriter, name string, data interface{}) {
 }
 
 func renderPartial(w http.ResponseWriter, name string, data interface{}) {
-	t := template.Must(template.New(name+".html").Funcs(funcMap()).ParseFiles(
-		"templates/partials/"+name+".html",
-	))
+	files := []string{"templates/partials/" + name + ".html"}
+	// object-list.html uses {{template "object-rows.html" .}} so both must be parsed together
+	if name == "object-list" {
+		files = append(files, "templates/partials/object-rows.html")
+	}
+	t, err := template.New(name + ".html").Funcs(funcMap()).ParseFiles(files...)
+	if err != nil {
+		log.Printf("partial template parse error (%s): %v", name, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := t.ExecuteTemplate(w, name+".html", data); err != nil {
 		log.Printf("partial template error (%s): %v", name, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

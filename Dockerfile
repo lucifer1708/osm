@@ -1,12 +1,10 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM golang:1.25 AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
 # Cache dependencies first
 COPY go.mod go.sum ./
-# Override the go directive so golang:1.24.2 can build (go mod tidy sets it to 1.25)
-RUN go mod edit -go=1.24 -toolchain=none
 RUN go mod download
 
 # Copy source and build a statically-linked binary
@@ -34,9 +32,11 @@ RUN mkdir -p /data && chown osm:osm /data
 
 USER osm
 
-EXPOSE 8080
+# 8080 = main app, 9090 = public files server (FILES_PORT)
+EXPOSE 8080 9090
 
 ENV PORT=8080 \
+    FILES_PORT=9090 \
     DB_PATH=/data/osm.db
 
 ENTRYPOINT ["./osm"]

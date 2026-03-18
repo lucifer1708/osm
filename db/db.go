@@ -78,6 +78,15 @@ func Init(path string) error {
 	db.Exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`)
 	// The first registered user is always admin
 	db.Exec(`UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users) AND is_admin = 0`)
+	// Idempotent: create trusted_devices table for existing DBs
+	db.Exec(`CREATE TABLE IF NOT EXISTS trusted_devices (
+		token      TEXT    PRIMARY KEY,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME NOT NULL
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trusted_user ON trusted_devices(user_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_trusted_exp  ON trusted_devices(expires_at)`)
 
 	DB = db
 	return nil
@@ -133,6 +142,16 @@ func migrate(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_perm_user ON permissions(user_id);
+
+	CREATE TABLE IF NOT EXISTS trusted_devices (
+		token      TEXT    PRIMARY KEY,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_trusted_user ON trusted_devices(user_id);
+	CREATE INDEX IF NOT EXISTS idx_trusted_exp  ON trusted_devices(expires_at);
 	`)
 	return err
 }
@@ -291,6 +310,38 @@ func DeleteUserSessions(userID int64) error {
 
 func CleanExpiredSessions() error {
 	_, err := DB.Exec(`DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
+	DB.Exec(`DELETE FROM trusted_devices WHERE expires_at <= CURRENT_TIMESTAMP`)
+	return err
+}
+
+// ─── Trusted device operations ────────────────────────────────────────────────
+
+func CreateTrustedDevice(userID int64, token string, ttl time.Duration) error {
+	_, err := DB.Exec(
+		`INSERT INTO trusted_devices (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		token, userID, time.Now().Add(ttl),
+	)
+	return err
+}
+
+// IsTrustedDevice returns true if the token is valid and belongs to the given user.
+func IsTrustedDevice(userID int64, token string) bool {
+	var count int
+	DB.QueryRow(
+		`SELECT COUNT(*) FROM trusted_devices
+		 WHERE token = ? AND user_id = ? AND expires_at > CURRENT_TIMESTAMP`,
+		token, userID,
+	).Scan(&count)
+	return count > 0
+}
+
+func DeleteTrustedDevice(token string) error {
+	_, err := DB.Exec(`DELETE FROM trusted_devices WHERE token = ?`, token)
+	return err
+}
+
+func DeleteUserTrustedDevices(userID int64) error {
+	_, err := DB.Exec(`DELETE FROM trusted_devices WHERE user_id = ?`, userID)
 	return err
 }
 

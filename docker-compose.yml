@@ -17,6 +17,10 @@ services:
       - PORT=8080
       - DB_PATH=/data/osm.db
       - FILES_PORT=9090
+      # Set PUBLIC_FILES_HOST to generate correct public URLs in the UI.
+      # Point your CDN/domain at this container on port 9090.
+      # Example: PUBLIC_FILES_HOST=static.euclidprotocol.com
+      # - PUBLIC_FILES_HOST=static.euclidprotocol.com
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/login"]
       interval: 30s
