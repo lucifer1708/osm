@@ -1,43 +1,62 @@
 package main
 
 import (
-	"bufio"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
+	"github.com/joho/godotenv"
+	"github.com/lucifer1708/object_storage_manager/db"
 	"github.com/lucifer1708/object_storage_manager/handlers"
 )
 
 func main() {
-	loadEnv(".env")
+	// Load .env — existing real env vars are never overwritten
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		log.Printf("warning: .env not loaded: %v", err)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./data/osm.db"
+	}
+	if err := db.Init(dbPath); err != nil {
+		log.Fatalf("database init failed: %v", err)
+	}
+	log.Printf("Database: %s", dbPath)
+
 	handlers.InitAuth()
 	handlers.AutoConnect()
 
 	mux := http.NewServeMux()
 
-	// Static files (public)
+	// Static (always public)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	// Auth routes (public)
+	// First-run setup
+	mux.HandleFunc("GET /setup", handlers.SetupPage)
+	mux.HandleFunc("POST /setup", handlers.SetupSubmit)
+
+	// Auth
 	mux.HandleFunc("GET /login", handlers.LoginPage)
 	mux.HandleFunc("POST /login", handlers.LoginSubmit)
 	mux.HandleFunc("GET /login/totp", handlers.TOTPVerifyPage)
 	mux.HandleFunc("POST /login/totp", handlers.TOTPVerifySubmit)
 	mux.HandleFunc("GET /logout", handlers.Logout)
 
-	// TOTP setup (requires full session)
+	// TOTP setup & settings
 	mux.HandleFunc("GET /totp/setup", handlers.TOTPSetupPage)
 	mux.HandleFunc("POST /totp/setup/verify", handlers.TOTPSetupVerify)
+	mux.HandleFunc("GET /settings", handlers.SettingsPage)
+	mux.HandleFunc("POST /settings/password", handlers.ChangePassword)
+	mux.HandleFunc("POST /settings/totp/reset", handlers.ResetTOTP)
 
-	// Protected app routes
+	// Storage app
 	mux.HandleFunc("GET /{$}", handlers.Index)
 	mux.HandleFunc("POST /connect", handlers.Connect)
 	mux.HandleFunc("GET /disconnect", handlers.Disconnect)
@@ -56,41 +75,9 @@ func main() {
 	mux.HandleFunc("POST /buckets/{bucket}/copy", handlers.CopyObject)
 	mux.HandleFunc("GET /search", handlers.SearchObjects)
 
-	// Wrap all routes with auth middleware
-	protected := handlers.AuthMiddleware(mux)
-
-	log.Printf("Object Storage Manager running on http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, protected); err != nil {
+	log.Printf("Object Storage Manager → http://localhost:%s", port)
+	if err := http.ListenAndServe(":"+port, handlers.AuthMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// loadEnv reads key=value pairs from a file and sets them as env vars.
-// Existing env vars are NOT overwritten (real env always wins over .env).
-func loadEnv(filename string) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
-		}
-		if os.Getenv(key) == "" {
-			os.Setenv(key, value)
-		}
-	}
-}

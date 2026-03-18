@@ -91,26 +91,21 @@ func normalizeEndpoint(endpoint string) string {
 
 func buildClient(endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
 	endpoint = normalizeEndpoint(endpoint)
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, reg string, options ...interface{}) (aws.Endpoint, error) {
-		if endpoint != "" {
-			return aws.Endpoint{
-				URL:               endpoint,
-				HostnameImmutable: true,
-				SigningRegion:     region,
-			}, nil
-		}
-		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-	})
 
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
 		awsconfig.WithRegion(region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-		awsconfig.WithEndpointResolverWithOptions(customResolver),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true }), nil
+
+	return s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+		}
+	}), nil
 }
 
 // templates cache
@@ -255,17 +250,38 @@ type ObjectInfo struct {
 
 // ---- Handlers ----
 
+// envHasStorageConfig returns true when storage credentials are provided via env/config,
+// meaning the user should never see the manual connect form.
+func envHasStorageConfig() bool {
+	return os.Getenv("ACCESS_KEY") != "" && os.Getenv("SECRET_KEY") != ""
+}
+
 func Index(w http.ResponseWriter, r *http.Request) {
+	managed := envHasStorageConfig()
+
+	// If managed mode but not connected, try again (e.g. transient startup failure)
+	if managed && !isConnected() {
+		AutoConnect()
+	}
+
 	data := map[string]interface{}{
-		"Connected":      isConnected(),
+		"Connected":       isConnected(),
+		"Managed":         managed,
 		"DefaultEndpoint": os.Getenv("ENDPOINT"),
-		"DefaultRegion":   func() string { r := os.Getenv("REGION"); if r == "" { return "us-east-1" }; return r }(),
+		"DefaultRegion": func() string {
+			if r := os.Getenv("REGION"); r != "" {
+				return r
+			}
+			return "us-east-1"
+		}(),
 	}
 
 	if isConnected() {
 		buckets, err := listBuckets()
 		if err == nil {
 			data["Buckets"] = buckets
+		} else {
+			data["ConnectError"] = err.Error()
 		}
 	}
 
@@ -441,15 +457,7 @@ func ListObjects(w http.ResponseWriter, r *http.Request) {
 	// Sort
 	sortObjects(objects, sortBy, sortDir)
 
-	// Get bucket stats
-	var totalSize int64
-	var fileCount int
-	for _, o := range objects {
-		if !o.IsFolder {
-			totalSize += o.Size
-			fileCount++
-		}
-	}
+	totalSize, fileCount := objectStats(objects)
 
 	renderPartial(w, "object-list", map[string]interface{}{
 		"Bucket":     bucket,
@@ -527,11 +535,14 @@ func UploadObject(w http.ResponseWriter, r *http.Request) {
 
 	objects, _ := listObjects(bucket, prefix)
 	sortObjects(objects, "", "")
+	totalSize, fileCount := objectStats(objects)
 
 	renderPartial(w, "object-list", map[string]interface{}{
 		"Bucket":    bucket,
 		"Prefix":    prefix,
 		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
 		"Toast":     msg,
 		"ToastOK":   len(errs) == 0,
 	})
@@ -605,13 +616,16 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 	objects, _ := listObjects(bucket, prefix)
 	sortObjects(objects, "", "")
 
+	totalSize, fileCount := objectStats(objects)
 	name := filepath.Base(strings.TrimSuffix(key, "/"))
 	renderPartial(w, "object-list", map[string]interface{}{
-		"Bucket":   bucket,
-		"Prefix":   prefix,
-		"Objects":  objects,
-		"Toast":    "'" + name + "' deleted successfully",
-		"ToastOK":  true,
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"Toast":     "'" + name + "' deleted successfully",
+		"ToastOK":   true,
 	})
 }
 
@@ -684,12 +698,15 @@ func CreateFolder(w http.ResponseWriter, r *http.Request) {
 	objects, _ := listObjects(bucket, prefix)
 	sortObjects(objects, "", "")
 
+	totalSize, fileCount := objectStats(objects)
 	renderPartial(w, "object-list", map[string]interface{}{
-		"Bucket":  bucket,
-		"Prefix":  prefix,
-		"Objects": objects,
-		"Toast":   "Folder '" + folderName + "' created",
-		"ToastOK": true,
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"Toast":     "Folder '" + folderName + "' created",
+		"ToastOK":   true,
 	})
 }
 
@@ -765,12 +782,15 @@ func CopyObject(w http.ResponseWriter, r *http.Request) {
 	objects, _ := listObjects(bucket, prefix)
 	sortObjects(objects, "", "")
 
+	totalSize, fileCount := objectStats(objects)
 	renderPartial(w, "object-list", map[string]interface{}{
-		"Bucket":  bucket,
-		"Prefix":  prefix,
-		"Objects": objects,
-		"Toast":   "Operation completed successfully",
-		"ToastOK": true,
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"Toast":     "Operation completed successfully",
+		"ToastOK":   true,
 	})
 }
 
@@ -937,6 +957,16 @@ func deleteFolder(ctx context.Context, bucket, prefix string) error {
 	}
 
 	return nil
+}
+
+func objectStats(objects []ObjectInfo) (totalSize int64, fileCount int) {
+	for _, o := range objects {
+		if !o.IsFolder {
+			totalSize += o.Size
+			fileCount++
+		}
+	}
+	return
 }
 
 func sortObjects(objects []ObjectInfo, by, dir string) {

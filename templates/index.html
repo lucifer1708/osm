@@ -1,6 +1,6 @@
 {{define "content"}}
-{{if not .Connected}}
-<!-- Connection Screen -->
+{{if and (not .Connected) (not .Managed)}}
+<!-- Manual connect screen — only shown when no credentials in .env -->
 <div class="min-h-[calc(100vh-56px)] flex items-center justify-center p-4">
   <div class="w-full max-w-md">
     <div class="text-center mb-8">
@@ -14,37 +14,31 @@
     </div>
 
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-6">
-      <form hx-post="/connect" hx-target="#error-msg" hx-indicator="#connect-spinner"
-        class="space-y-4">
-
+      <form hx-post="/connect" hx-target="#error-msg" hx-indicator="#connect-spinner" class="space-y-4">
         <div id="error-msg"></div>
-
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Endpoint URL</label>
           <input type="url" name="endpoint" value="{{.DefaultEndpoint}}" placeholder="https://s3.amazonaws.com or https://minio.example.com"
             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white placeholder-gray-400">
           <p class="text-xs text-gray-400 mt-1">Leave empty for standard AWS S3</p>
         </div>
-
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Access Key</label>
-            <input type="text" name="access_key" required placeholder="AKIAIOSFODNN7EXAMPLE"
-              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono placeholder-gray-400">
+            <input type="text" name="access_key" required autocomplete="off"
+              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Secret Key</label>
-            <input type="password" name="secret_key" required placeholder="••••••••••••••••••••"
-              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono placeholder-gray-400">
+            <input type="password" name="secret_key" required autocomplete="off"
+              class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono">
           </div>
         </div>
-
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Region</label>
           <input type="text" name="region" value="{{.DefaultRegion}}" placeholder="us-east-1"
             class="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white placeholder-gray-400">
         </div>
-
         <button type="submit"
           class="w-full flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 rounded-xl transition-colors shadow-sm">
           <span id="connect-spinner" class="htmx-indicator spinner"></span>
@@ -53,36 +47,45 @@
       </form>
     </div>
 
-    <!-- Providers hint -->
     <div class="mt-4 flex items-center justify-center gap-6">
       <span class="text-xs text-gray-400">Compatible with:</span>
       <div class="flex gap-4 text-xs text-gray-500">
-        <span>AWS S3</span>
-        <span>MinIO</span>
-        <span>Cloudflare R2</span>
-        <span>Wasabi</span>
-        <span>Backblaze B2</span>
+        <span>AWS S3</span><span>MinIO</span><span>Cloudflare R2</span><span>Wasabi</span><span>Backblaze B2</span>
       </div>
     </div>
   </div>
 </div>
 
 <style>
-.alert-error {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-  border-radius: 0.75rem;
-  padding: 0.75rem 1rem;
-  font-size: 0.875rem;
-  margin-bottom: 0.5rem;
-}
-.dark .alert-error {
-  background: #450a0a;
-  color: #f87171;
-  border-color: #7f1d1d;
-}
+.alert-error { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:.75rem; padding:.75rem 1rem; font-size:.875rem; margin-bottom:.5rem; }
+.dark .alert-error { background:#450a0a; color:#f87171; border-color:#7f1d1d; }
 </style>
+
+{{else if and (not .Connected) .Managed}}
+<!-- Managed mode: credentials set in .env but connection failed -->
+<div class="min-h-[calc(100vh-56px)] flex items-center justify-center p-4">
+  <div class="w-full max-w-md text-center">
+    <div class="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+      <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+    </div>
+    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">Storage connection failed</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Credentials are configured in <code class="font-mono bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">.env</code> but the connection could not be established.</p>
+    {{if .ConnectError}}
+    <p class="text-xs text-red-500 dark:text-red-400 mt-2 font-mono bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{{.ConnectError}}</p>
+    {{end}}
+    <div class="mt-6 flex gap-3 justify-center">
+      <a href="/" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-xl transition-colors">
+        Retry
+      </a>
+      <a href="/disconnect" class="px-4 py-2 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+        Change credentials
+      </a>
+    </div>
+    <p class="text-xs text-gray-400 mt-4">Check your <code class="font-mono">.env</code> — verify ENDPOINT, ACCESS_KEY, SECRET_KEY, and REGION.</p>
+  </div>
+</div>
 
 {{else}}
 <!-- Main App -->

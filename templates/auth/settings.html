@@ -1,0 +1,192 @@
+{{define "settings.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — ObjectStore</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { sans: ['Inter','sans-serif'] } } } }
+    if (localStorage.getItem('dark') === 'true' || window.matchMedia('(prefers-color-scheme: dark)').matches)
+      document.documentElement.classList.add('dark');
+  </script>
+  <style>body { font-family:'Inter',sans-serif; } input:-webkit-autofill { -webkit-box-shadow:0 0 0 30px #1e293b inset!important; -webkit-text-fill-color:#f1f5f9!important; }</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+<!-- Navbar -->
+<nav class="bg-slate-800 border-b border-slate-700 sticky top-0 z-40">
+  <div class="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="/" class="flex items-center gap-2 group">
+        <div class="w-7 h-7 bg-gradient-to-br from-sky-400 to-blue-600 rounded-lg flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+          </svg>
+        </div>
+        <span class="font-semibold text-white text-sm group-hover:text-sky-400 transition">ObjectStore</span>
+      </a>
+      <span class="text-slate-600">/</span>
+      <span class="text-slate-400 text-sm">Settings</span>
+    </div>
+    <a href="/logout" class="text-sm text-slate-400 hover:text-white transition flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+      </svg>
+      Sign out
+    </a>
+  </div>
+</nav>
+
+<div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
+
+  {{if .Error}}
+  <div class="flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-xl px-4 py-3">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+    </svg>
+    {{.Error}}
+  </div>
+  {{end}}
+
+  <!-- Profile -->
+  <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+      </svg>
+      Account
+    </h2>
+    <div class="flex items-center gap-4">
+      <div class="w-12 h-12 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-lg font-bold text-white flex-shrink-0">
+        {{initial .User.Username}}
+      </div>
+      <div>
+        <p class="font-semibold text-white">{{.User.Username}}</p>
+        <p class="text-xs text-slate-500 mt-0.5">Member since {{formatTime .User.CreatedAt}}</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        {{if .HasTOTP}}
+        <span class="flex items-center gap-1.5 text-xs bg-green-500/10 text-green-400 border border-green-500/30 px-2.5 py-1 rounded-full">
+          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+          2FA enabled
+        </span>
+        {{else}}
+        <span class="flex items-center gap-1.5 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>
+          2FA not set up
+        </span>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <!-- Change password -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
+      <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+        </svg>
+        Change Password
+      </h2>
+      <form method="POST" action="/settings/password" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Current password</label>
+          <input type="password" name="current_password" required autocomplete="current-password"
+            class="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">New password</label>
+          <input type="password" name="new_password" required minlength="8" autocomplete="new-password"
+            class="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Confirm new password</label>
+          <input type="password" name="confirm_password" required autocomplete="new-password"
+            class="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+        </div>
+        <button type="submit"
+          class="w-full mt-1 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium py-2 rounded-lg transition">
+          Update Password
+        </button>
+      </form>
+    </div>
+
+    <!-- Two-factor auth -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
+      <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
+        Two-Factor Auth
+      </h2>
+      {{if .HasTOTP}}
+      <p class="text-sm text-slate-400 mb-4">2FA is active. Your account requires an authenticator code on each login.</p>
+      <div class="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 mb-4 text-xs text-amber-400">
+        Resetting 2FA will require you to re-scan a new QR code on next login.
+      </div>
+      <form method="POST" action="/settings/totp/reset">
+        <button type="submit"
+          class="w-full bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium py-2 rounded-lg transition">
+          Reset 2FA
+        </button>
+      </form>
+      {{else}}
+      <p class="text-sm text-slate-400 mb-4">Two-factor authentication is not set up. Enable it to secure your account with an authenticator app.</p>
+      <a href="/totp/setup"
+        class="block w-full text-center bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium py-2 rounded-lg transition">
+        Enable 2FA
+      </a>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- Audit log -->
+  <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      Activity Log
+      <span class="text-xs text-slate-500 font-normal">(last 50 events)</span>
+    </h2>
+    {{if .AuditLog}}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-700">
+            <th class="text-left pb-2 pr-4">Event</th>
+            <th class="text-left pb-2 pr-4">User</th>
+            <th class="text-left pb-2 pr-4">IP</th>
+            <th class="text-left pb-2">Time</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/50">
+          {{range .AuditLog}}
+          <tr class="hover:bg-slate-700/30 transition">
+            <td class="py-2 pr-4">
+              <span class="flex items-center gap-2 {{eventColor .Event}}">
+                <span>{{eventIcon .Event}}</span>
+                <span class="text-xs font-medium">{{eventLabel .Event}}</span>
+              </span>
+            </td>
+            <td class="py-2 pr-4 text-xs text-slate-300">{{.Username}}</td>
+            <td class="py-2 pr-4 text-xs text-slate-500 font-mono">{{.IP}}</td>
+            <td class="py-2 text-xs text-slate-500 whitespace-nowrap">{{formatTime .CreatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="text-sm text-slate-500 text-center py-8">No activity recorded yet</p>
+    {{end}}
+  </div>
+
+</div>
+</body>
+</html>
+{{end}}
