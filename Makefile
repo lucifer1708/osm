@@ -2,7 +2,7 @@ APP  := osm
 BIN  := ./bin/$(APP)
 PORT ?= 8081
 
-.PHONY: all build run dev start clean setup create-user help
+.PHONY: all build run dev start clean setup create-user docker-build docker-up docker-down docker-logs help
 
 all: build
 
@@ -45,6 +45,23 @@ setup:
 ## Interactively create a user in the SQLite database
 create-user:
 	@go run ./cmd/create-user
+
+## Build Docker image
+docker-build:
+	docker compose build
+
+## Start with Docker Compose (detached)
+docker-up:
+	docker compose up -d
+	@echo "Running at http://localhost:$${PORT:-8080}"
+
+## Stop Docker Compose stack
+docker-down:
+	docker compose down
+
+## Tail container logs
+docker-logs:
+	docker compose logs -f osm
 
 ## Remove build artifacts (keeps database)
 clean:
