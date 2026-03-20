@@ -83,6 +83,45 @@
   </div>
 </div>
 
+<!-- Bulk Action Bar -->
+<div id="bulk-bar"
+  class="hidden sticky bottom-0 z-10 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-2.5 flex items-center gap-3 shadow-lg"
+  data-bucket="{{.Bucket}}"
+  data-prefix="{{.Prefix}}">
+  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+    <span id="bulk-count">0</span> selected
+  </span>
+  {{if .CanWrite}}
+  <button onclick="bulkDelete()"
+    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+    </svg>
+    Delete
+  </button>
+  <button onclick="bulkACL('public-read')"
+    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
+    </svg>
+    Make Public
+  </button>
+  <button onclick="bulkACL('private')"
+    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+    </svg>
+    Make Private
+  </button>
+  {{end}}
+  <button onclick="clearBulkSelection()"
+    class="ml-auto p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors" title="Clear selection">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    </svg>
+  </button>
+</div>
+
 <!-- Drop Zone -->
 <div id="drop-zone-{{.Bucket}}"
   class="drop-zone mx-4 mt-3 border-2 border-dashed border-transparent rounded-xl transition-all"
@@ -98,6 +137,10 @@
   <table class="w-full text-sm">
     <thead>
       <tr class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+        <th class="px-3 py-2 w-8">
+          <input type="checkbox" id="select-all-checkbox"
+            class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 cursor-pointer">
+        </th>
         <th class="text-left px-4 py-2">
           <button
             hx-get="/buckets/{{.Bucket}}/objects?prefix={{.Prefix}}&sort=name&dir={{if and (eq .SortBy "name") (eq .SortDir "asc")}}desc{{else}}asc{{end}}&search={{.Search}}"
@@ -174,5 +217,115 @@ function handleGlobalDrop(e, bucket, prefix) {
   const files = e.dataTransfer.files;
   if (files.length > 0) showUploadModal(bucket, prefix, files);
 }
+
+// Bulk selection
+(function() {
+  const bar = document.getElementById('bulk-bar');
+  const selectAll = document.getElementById('select-all-checkbox');
+  const countEl = document.getElementById('bulk-count');
+
+  function getChecked() {
+    return Array.from(document.querySelectorAll('.row-checkbox:checked'));
+  }
+
+  function updateBulkBar() {
+    const checked = getChecked();
+    const all = document.querySelectorAll('.row-checkbox');
+    countEl.textContent = checked.length;
+    if (checked.length === 0) {
+      bar.classList.add('hidden');
+      if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+    } else {
+      bar.classList.remove('hidden');
+      if (selectAll) {
+        if (checked.length === all.length) {
+          selectAll.checked = true;
+          selectAll.indeterminate = false;
+        } else {
+          selectAll.checked = false;
+          selectAll.indeterminate = true;
+        }
+      }
+    }
+  }
+
+  // Delegated listener on tbody — attached to the swapped element so it doesn't
+  // accumulate on document across multiple HTMX swaps.
+  const tbody = document.querySelector('#object-panel tbody');
+  if (tbody) {
+    tbody.addEventListener('change', function(e) {
+      if (e.target.classList.contains('row-checkbox')) {
+        updateBulkBar();
+      }
+    });
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      document.querySelectorAll('.row-checkbox').forEach(cb => {
+        cb.checked = selectAll.checked;
+      });
+      updateBulkBar();
+    });
+  }
+
+  window.clearBulkSelection = function() {
+    document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+    if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+    if (bar) bar.classList.add('hidden');
+  };
+
+  window.bulkDelete = function() {
+    const checked = getChecked();
+    if (!checked.length) return;
+    const keys = checked.map(cb => cb.value);
+    const folderCount = keys.filter(k => k.endsWith('/')).length;
+    const msg = folderCount > 0
+      ? `Delete ${keys.length} item(s)? Folders will be deleted recursively.`
+      : `Delete ${keys.length} item(s)?`;
+    if (!confirm(msg)) return;
+
+    const bucket = bar.dataset.bucket;
+    const prefix = bar.dataset.prefix;
+
+    const params = new URLSearchParams();
+    keys.forEach(k => params.append('keys[]', k));
+    params.append('prefix', prefix);
+
+    fetch(`/buckets/${bucket}/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    }).then(res => res.text()).then(html => {
+      const panel = document.getElementById('object-panel');
+      panel.innerHTML = html;
+      htmx.process(panel);
+    });
+  };
+
+  window.bulkACL = function(acl) {
+    const checked = getChecked();
+    if (!checked.length) return;
+    const keys = checked.map(cb => cb.value);
+
+    const bucket = bar.dataset.bucket;
+    const prefix = bar.dataset.prefix;
+
+    const params = new URLSearchParams();
+    keys.forEach(k => params.append('keys[]', k));
+    params.append('acl', acl);
+    params.append('prefix', prefix);
+
+    fetch(`/buckets/${bucket}/bulk-acl`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    }).then(res => res.text()).then(html => {
+      const panel = document.getElementById('object-panel');
+      panel.innerHTML = html;
+      htmx.process(panel);
+    });
+  };
+})();
 </script>
 {{end}}

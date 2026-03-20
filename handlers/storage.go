@@ -746,6 +746,187 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func BulkDeleteObjects(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		renderError(w, "Not connected")
+		return
+	}
+	bucket := r.PathValue("bucket")
+	if !canAccess(r, bucket, "", "write") {
+		denyAccess(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		renderError(w, err.Error())
+		return
+	}
+	keys := r.Form["keys[]"]
+	prefix := r.FormValue("prefix")
+	if len(keys) == 0 {
+		renderError(w, "No keys provided")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var deleted int
+	var errs []string
+	for _, key := range keys {
+		if strings.HasSuffix(key, "/") {
+			if err := deleteFolder(ctx, bucket, key); err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
+		} else {
+			_, err := getClient().DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+			})
+			if err != nil {
+				errs = append(errs, "Failed to delete "+key+": "+err.Error())
+				continue
+			}
+			aclStateCache.Delete(aclCacheKey(bucket, key))
+		}
+		deleted++
+	}
+
+	objects, _ := listObjects(bucket, prefix)
+	sortObjects(objects, "", "")
+	totalSize, fileCount := objectStats(objects)
+
+	toast := fmt.Sprintf("%d item(s) deleted", deleted)
+	toastOK := true
+	if len(errs) > 0 {
+		toast = fmt.Sprintf("%d deleted, %d failed", deleted, len(errs))
+		toastOK = false
+	}
+
+	renderPartial(w, "object-list", map[string]interface{}{
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"Toast":     toast,
+		"ToastOK":   toastOK,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
+	})
+}
+
+func BulkSetACL(w http.ResponseWriter, r *http.Request) {
+	if !isConnected() {
+		renderError(w, "Not connected")
+		return
+	}
+	bucket := r.PathValue("bucket")
+	if !canAccess(r, bucket, "", "write") {
+		denyAccess(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		renderError(w, err.Error())
+		return
+	}
+	keys := r.Form["keys[]"]
+	aclVal := r.FormValue("acl")
+	prefix := r.FormValue("prefix")
+	if len(keys) == 0 {
+		renderError(w, "No keys provided")
+		return
+	}
+	if aclVal != "public-read" && aclVal != "private" {
+		renderError(w, "Invalid ACL value")
+		return
+	}
+
+	var cannedACL types.ObjectCannedACL
+	if aclVal == "public-read" {
+		cannedACL = types.ObjectCannedACLPublicRead
+	} else {
+		cannedACL = types.ObjectCannedACLPrivate
+	}
+	isPublic := aclVal == "public-read"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Expand folder keys to individual object keys
+	var resolved []string
+	for _, key := range keys {
+		if strings.HasSuffix(key, "/") {
+			objs, err := listObjects(bucket, key)
+			if err != nil {
+				renderError(w, "Failed to list folder "+key+": "+err.Error())
+				return
+			}
+			for _, obj := range objs {
+				if !obj.IsFolder {
+					resolved = append(resolved, obj.Key)
+				}
+			}
+		} else {
+			resolved = append(resolved, key)
+		}
+	}
+	if len(resolved) == 0 {
+		renderError(w, "No objects found to update ACL")
+		return
+	}
+
+	setACLOnKey := func(key string) error {
+		_, err := getClient().PutObjectAcl(ctx, &s3.PutObjectAclInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+			ACL:    cannedACL,
+		})
+		if err != nil {
+			_, err = getClient().CopyObject(ctx, &s3.CopyObjectInput{
+				Bucket:            aws.String(bucket),
+				CopySource:        aws.String(bucket + "/" + key),
+				Key:               aws.String(key),
+				ACL:               cannedACL,
+				MetadataDirective: types.MetadataDirectiveCopy,
+			})
+		}
+		return err
+	}
+
+	var updated int
+	var errs []string
+	for _, key := range resolved {
+		if err := setACLOnKey(key); err != nil {
+			errs = append(errs, "Failed "+key+": "+err.Error())
+			continue
+		}
+		aclStateCache.Store(aclCacheKey(bucket, key), isPublic)
+		updated++
+	}
+
+	objects, _ := listObjects(bucket, prefix)
+	sortObjects(objects, "", "")
+	totalSize, fileCount := objectStats(objects)
+
+	toast := fmt.Sprintf("ACL updated for %d item(s)", updated)
+	toastOK := true
+	if len(errs) > 0 {
+		toast = fmt.Sprintf("%d updated, %d failed", updated, len(errs))
+		toastOK = false
+	}
+
+	renderPartial(w, "object-list", map[string]interface{}{
+		"Bucket":    bucket,
+		"Prefix":    prefix,
+		"Objects":   objects,
+		"TotalSize": totalSize,
+		"FileCount": fileCount,
+		"Toast":     toast,
+		"ToastOK":   toastOK,
+		"CanWrite":  canAccess(r, bucket, prefix, "write"),
+	})
+}
+
 func PresignObject(w http.ResponseWriter, r *http.Request) {
 	if !isConnected() {
 		renderError(w, "Not connected")

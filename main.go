@@ -97,6 +97,8 @@ func main() {
 	mux.HandleFunc("GET /buckets/{bucket}/acl/{key...}", handlers.GetACL)
 	mux.HandleFunc("POST /buckets/{bucket}/acl/{key...}", handlers.SetACL)
 	mux.HandleFunc("GET /buckets/{bucket}/acl-json/{key...}", handlers.GetACLJSON)
+	mux.HandleFunc("POST /buckets/{bucket}/bulk-delete", handlers.BulkDeleteObjects)
+	mux.HandleFunc("POST /buckets/{bucket}/bulk-acl", handlers.BulkSetACL)
 	mux.HandleFunc("GET /search", handlers.SearchObjects)
 
 	log.Printf("Object Storage Manager → http://localhost:%s", port)

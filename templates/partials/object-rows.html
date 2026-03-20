@@ -1,6 +1,10 @@
 {{define "object-rows.html"}}
 {{range .Objects}}
 <tr class="file-row group hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+  <td class="px-3 py-2.5 w-8">
+    <input type="checkbox" class="row-checkbox w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+      value="{{.Key}}">
+  </td>
   <td class="px-4 py-2.5">
     <div class="flex items-center gap-2.5">
       <span class="text-base flex-shrink-0">{{fileIcon .Key}}</span>
@@ -90,7 +94,7 @@
 <tr hx-get="/buckets/{{.Bucket}}/objects?prefix={{.Prefix}}&token={{urlEncode .NextToken}}&sort={{.SortBy}}&dir={{.SortDir}}"
     hx-trigger="revealed"
     hx-swap="outerHTML">
-  <td colspan="4" class="px-4 py-4 text-center">
+  <td colspan="5" class="px-4 py-4 text-center">
     <div class="flex items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500">
       <svg class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
