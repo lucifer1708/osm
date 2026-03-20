@@ -1268,7 +1268,7 @@ func listBuckets() ([]types.Bucket, error) {
 	return out.Buckets, nil
 }
 
-const objectPageSize = 100
+const objectPageSize = 20
 
 // listObjectsPage fetches one page of objects (up to objectPageSize items).
 // Returns the objects, the continuation token for the next page (empty if last page), and any error.
